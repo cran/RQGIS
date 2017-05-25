@@ -1,13 +1,19 @@
 #' @title Retrieve the environment settings to run QGIS from within R
-#' @description \code{set_env} tries to find all the paths necessary to run QGIS
-#'   from within R.
-#' @param root Root path to the QGIS-installation. If left empty, the function
-#'   looks for \code{qgis.bat} on the C: drive under Windows. On a
-#'   Mac, it looks for \code{QGIS.app} under "Applications" and
-#'   "/usr/local/Cellar/". On Linux, \code{set_env} assumes that the root path
-#'   is "/usr".
-#' @param ltr If \code{TRUE}, \code{set_env} will use the long term release of 
-#'   QGIS, if available (only for Windows).
+#' @description `set_env` tries to find all the paths necessary to run QGIS from
+#'   within R.
+#' @importFrom stringr str_detect
+#' @param root Root path to the QGIS-installation. If left empty, the function 
+#'   looks for `qgis.bat` first in the most likely locations (C:/OSGEO4~1, 
+#'   C:/OSGEO4~2), and secondly on the C: drive under Windows. On a Mac, it
+#'   looks for `QGIS.app` under "Applications" and "/usr/local/Cellar/". On
+#'   Linux, `set_env` assumes that the root path is "/usr".
+#' @param new When called for the first time in an R session, `set_env` caches 
+#'   its output. Setting `new` to `TRUE` resets the cache when calling `set_env`
+#'   again. Otherwise, the cached output will be loaded back into R even if you 
+#'   used new values for function arguments `root` and/or `dev`.
+#' @param dev If set to `TRUE`, `set_env` will use the development version of 
+#'   QGIS (if available).
+#' @param ... Currently not in use.
 #' @return The function returns a list containing all the path necessary to run 
 #'   QGIS from within R. This is the root path, the QGIS prefix path and the 
 #'   path to the Python plugins.
@@ -23,13 +29,25 @@
 #' 
 #' @export
 #' @author Jannes Muenchow, Patrick Schratz
-set_env <- function(root = NULL, ltr = TRUE) {
-
+set_env <- function(root = NULL, new = FALSE, dev = FALSE, ...) {
+  # ok, let's try to find QGIS first in the most likely place!
+  dots <- list(...)
+  if (length(dots) > 0 && any(grepl("ltr", names(dots)))) {
+    warning("Function argument 'ltr' is deprecated. Please use 'dev' instead.", 
+            call. = FALSE)
+    # we have to reverse the specified input, e.g., if ltr = TRUE, then dev 
+    # has to be FALSE
+    dev <- !isTRUE(dots$ltr)
+  }
+  
+  # load cached qgis_env if possible
+  if ("qgis_env" %in% ls(.RQGIS_cache) && new == FALSE) {
+    return(get("qgis_env", envir = .RQGIS_cache))
+  }
+  
   if (Sys.info()["sysname"] == "Windows") {
     
     if (is.null(root)) {
-      message("Trying to find OSGeo4W on your C: drive.")
-      
       # raw command
       # change to C: drive and (&) list all subfolders of C:
       # /b bare format (no heading, file sizes or summary)
@@ -41,20 +59,24 @@ set_env <- function(root = NULL, ltr = TRUE) {
       # to the directory when exiting the function
       cwd <- getwd()
       on.exit(setwd(cwd))
-      setwd("C:/")
+      # Look first in the most likely location
+      osgeo <- c("C:/OSGEO4~1", "C:/OSGEO4~2")
+      ind <- dir.exists(osgeo)
+      # just keep the existing directories
+      osgeo <- osgeo[ind]
+      # if there in fact is a 32- and a 64-bit version, take the 64-bit
+      # ("C:/OSGEO~1")
+      wd <- ifelse(length(osgeo) > 0, osgeo[1], "C:/")
+      message(sprintf("Trying to find QGIS in %s.", wd))
+      setwd(wd)
       # raw <- "dir /s /b | findstr"
       # make it more general, since C:/WINDOWS/System32 might not be part of
       # PATH on every Windows machine
-      raw <- "dir /s /b | %SystemRoot%\\System32\\findstr"
+      raw <- "dir /s /b | %SystemRoot%\\System32\\findstr /r"
       # search QGIS on the the C: drive
       cmd <- paste(raw, shQuote("bin\\\\qgis.bat$"))
       root <- shell(cmd, intern = TRUE)
-      # # search GRASS
-      # cmd <- paste(raw, shQuote("grass-[0-9].*\\bin$"))
-      # tmp <- shell(cmd, intern = TRUE)
-      # # look for Python27
-      # cmd <- paste(raw, shQuote("Python27$"))
-      # shell(cmd, intern = TRUE)
+
       
       if (length(root) == 0) {
         stop("Sorry, I could not find QGIS on your C: drive.",
@@ -70,27 +92,74 @@ set_env <- function(root = NULL, ltr = TRUE) {
       }
     }
     # harmonize root syntax
-    root <- gsub("/|//", "\\\\", root)
+    root <- normalizePath(root)
     # make sure that the root path does not end with some sort of slash
-    root <- gsub("/$|//$|\\$|\\\\$", "", root)
+    root <- gsub("\\\\$", "", root)
   }
   
   if (Sys.info()["sysname"] == "Darwin") {
     if (is.null(root)) {
+      
+      message("Checking for homebrew osgeo4mac installation on your system. \n")
       # check for homebrew QGIS installation
-      path <- system("find /usr/local/Cellar/ -name 'QGIS.app'", intern = TRUE)
-      if (length(path) > 0) {
-        root <- path
+      path <- suppressWarnings(
+        system2('find', c('/usr/local/Cellar', '-name', 'QGIS.app'), 
+                stdout = TRUE, stderr = TRUE))
+      
+      no_homebrew <- str_detect(path, "find: /usr/local")
+      
+      if (no_homebrew[1] == TRUE) {
+        message("Found no QGIS homebrew installation. 
+                Checking for QGIS Kyngchaos version now.")
       }
-      if (is.null(root)) {
-        # check for binary QGIS installation
-        path <- system("find /Applications -name 'QGIS.app'", intern = TRUE)
-        if(length(path) > 0) {
-          root <- path
+      if (no_homebrew == FALSE && length(path) == 1) {
+        root <- path
+        message("Found QGIS osgeo4mac installation. Setting environment...")
+      } 
+      
+      # check for multiple homebrew installations
+      if (length(path) == 2) {
+        
+        # extract version out of root path
+        path1 <- 
+          as.numeric(regmatches(path[1], gregexpr("[0-9]+", path[1]))[[1]][3])
+        path2 <- 
+          as.numeric(regmatches(path[2], gregexpr("[0-9]+", path[2]))[[1]][3])
+        
+        # account for 'dev' arg installations are not constant within path ->
+        # depend on which version was installed first/last hence we have to
+        # catch all possibilites
+        if (dev == TRUE && path1 > path2) {
+          root <- path[1]
+          message("Found QGIS osgeo4mac DEV installation. Setting environment...")
+        } else if (dev == TRUE && path1 < path2) {
+          root <- path[2]
+          message("Found QGIS osgeo4mac DEV installation. Setting environment...")
+        } else if (dev == FALSE && path1 > path2) {
+          root <- path[2]
+          message("Found QGIS osgeo4mac LTR installation. Setting environment...")
+        } else if (dev == FALSE && path1 < path2) {
+          root <- path[1]
+          message("Found QGIS osgeo4mac LTR installation. Setting environment...")
         }
       }
+      # just in case if someone has more than 2 QGIS homebrew installations
+      # (very unlikely though)
+      if (length(path) > 2) {
+        stop("Found more than 2 QGIS homebrew installations. 
+             Please clean up or set 'set_env()' manually.")
+      }
+      
+      # check for Kyngchaos installation
+      if (is.null(root)) {
+        path <- system("find /Applications -name 'QGIS.app'", intern = TRUE)
+        if (length(path) > 0) {
+          root <- path
+          message("Found QGIS Kyngchaos installation. Setting environment...")
+        }
+      }
+      }
     }
-  }
   
   if (Sys.info()["sysname"] == "Linux") {
     if (is.null(root)) {
@@ -99,17 +168,133 @@ set_env <- function(root = NULL, ltr = TRUE) {
     }
   }
   qgis_env <- list(root = root)
+  qgis_env <- c(qgis_env, check_apps(root = root, dev = dev))
+  assign("qgis_env", qgis_env, envir = .RQGIS_cache)
+  
+  
+  # write warning if Kyngchaos QGIS for Mac is installed
+  if (any(grepl("/Applications", qgis_env))) {
+    warning(
+      paste0("We recognized that you are using the Kyngchaos QGIS binary.\n",
+             "Please consider installing QGIS from homebrew:", 
+             "'https://github.com/OSGeo/homebrew-osgeo4mac'.",
+             " Run 'vignette(install_guide)' for installation instructions.\n",
+             "The Kyngchaos installation throws some warnings during ", 
+             "processing. However, usage/outcome is not affected and you can ", 
+             "continue using the Kyngchaos installation."))
+  }
+  
   # return your result
-  c(qgis_env, check_apps(root = root, ltr = ltr))
+  qgis_env
+  }
+
+#' @title Open a QGIS application
+#' @description `open_app` first sets all the correct paths to the QGIS Python 
+#'   binary, and secondly opens a QGIS application while importing the most 
+#'   common Python modules.
+#' @note Please note that the function changes your environment settings via 
+#'   [base::Sys.getenv()] which is necessary to run the QGIS Python API.
+#' @param qgis_env Environment settings containing all the paths to run the QGIS
+#'   API. For more information, refer to [set_env()]. Basically, the function
+#'   defines a few new environment variables which should not interfere with
+#'   other settings.
+#' @return The function enables a 'tunnel' to the Python QGIS API.
+#' @author Jannes Muenchow
+#' @examples 
+#' \dontrun{
+#' open_app()
+#' }
+#' @export
+open_app <- function(qgis_env = set_env()) {
+  
+  # check for server infrastructure 
+  check_for_server()
+  
+  # be a good citizen and restore the PATH
+  settings <- as.list(Sys.getenv())
+  # since we are adding quite a few new environment variables these will remain
+  # (PYTHONPATH, QT_PLUGIN_PATH, etc.). We could unset these before exiting the
+  # function but I am not sure if this is necessary
+  
+  # Well, well, not sure if we should change it back or if we at least have to 
+  # get rid off Anaconda Python or other Python binaries - yes, we do, otherwise
+  # reticulate might run into problems when loading modules because it might try
+  # to load them first from the other binaries indicated in PATH
+  
+  # on.exit(do.call(Sys.setenv, settings))
+  
+  # resetting system settings on exit causes that SAGA algorithms cannot be
+  # processed anymore, find out why this is!!!
+  
+  if (Sys.info()["sysname"] == "Windows") {
+    # run Windows setup
+    setup_win(qgis_env = qgis_env)
+    
+    # Ok, basically, we added a few new paths (especially under Windows) but 
+    # that's about it, we don't have to change that back. Only under Windows we 
+    # start with a clean, i.e. empty PATH, and delete everything what was in 
+    # there before, so we should at least add the old PATH to our newly created
+    # one
+    reset_path(settings)
+  } else if (Sys.info()["sysname"] == "Linux") {
+    setup_linux(qgis_env = qgis_env)
+  } else if (Sys.info()["sysname"] == "Darwin") { 
+    setup_mac(qgis_env = qgis_env)
+  }
+
+
+  # make sure that QGIS is not already running (this would crash R) app =
+  # QgsApplication([], True)  # see below 
+  # We can only run the test after we have set all the paths. Otherwise
+  # reticulate would use another Python interpreter (e.g, Anaconda Python
+  # instead of the Python interpreter delivered with QGIS) when running open_app
+  # for the first time
+  tmp <- try(expr =  py_run_string("app")$app,
+             silent = TRUE)
+  if (!inherits(tmp, "try-error")) {
+    stop("Python QGIS application is already running.")
+  }
+  
+  py_run_string("import os, sys, re, webbrowser")
+  py_run_string("from qgis.core import *")
+  py_run_string("from osgeo import ogr")
+  py_run_string("from PyQt4.QtCore import *")
+  py_run_string("from PyQt4.QtGui import *")
+  py_run_string("from qgis.gui import *")
+  # interestingly, under Linux the app would start also without running the next
+  # two lines
+  set_prefix <- paste0("QgsApplication.setPrefixPath(r'",
+                       qgis_env$qgis_prefix_path, "', True)")
+  py_run_string(set_prefix)
+  # not running the next line will produce following error message under Linux
+  # QSqlDatabase: QSQLITE driver not loaded
+  # QSqlDatabase: available drivers: 
+  # ERROR: Opening of authentication db FAILED
+  # QSqlQuery::prepare: database not open
+  # WARNING: Auth db query exec() FAILED
+  py_run_string("QgsApplication.showSettings()")
+  py_run_string("app = QgsApplication([], True)")
+  py_run_string("QgsApplication.initQgis()")
+  code <- paste0("sys.path.append(r'", qgis_env$python_plugins, "')")
+  py_run_string(code)
+  
+  # attach further modules 
+  py_file <- system.file("python", "import_setup.py", package = "RQGIS")
+  py_run_file(py_file)
+  # attach our RQGIS class (needed for alglist, algoptions, alghelp)
+  py_file <- system.file("python", "python_funs.py", package = "RQGIS")
+  py_run_file(py_file)
+  # initialize our RQGIS class
+  py_run_string("RQGIS = RQGIS()")
 }
 
 #' @title QGIS session info
-#' @description \code{qgis_session_info} reports the version of QGIS and
+#' @description `qgis_session_info` reports the version of QGIS and
 #'   installed third-party providers (so far GRASS 6, GRASS 7, and SAGA). 
 #'   Additionally, it figures out with which SAGA versions the QGIS installation
 #'   is compatible.
 #' @param qgis_env Environment settings containing all the paths to run the QGIS
-#'   API. For more information, refer to \code{\link{set_env}}.
+#'   API. For more information, refer to [set_env()].
 #' @return The function returns a list with following elements:
 #' \enumerate{
 #'  \item{qgis_version: Name and version of QGIS used by RQGIS.}
@@ -123,7 +308,6 @@ set_env <- function(root = NULL, ltr = TRUE) {
 #'  \item{supported_saga_versions: character vector representing the SAGA
 #'  versions supported by the QGIS installation.}
 #' }
-
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
 #' @export
 #' @examples 
@@ -131,129 +315,68 @@ set_env <- function(root = NULL, ltr = TRUE) {
 #' qgis_session_info()
 #' }
 qgis_session_info <- function(qgis_env = set_env()) {
-  
-  # set the paths
-  cwd <- getwd()
-  on.exit(setwd(cwd))
-  tmp_dir <- tempdir()
-  setwd(tmp_dir)
-  
-  # build the raw scripts
-  cmds <- build_cmds(qgis_env)
-  
-  # extend the python command
-  py_cmd <- 
-    c(cmds$py_cmd,
-      "import csv",
-      "import re",
-      paste0("from processing.algs.saga.SagaAlgorithmProvider",
-             " import SagaAlgorithmProvider"),
-      "from processing.algs.saga import SagaUtils",
-      "from processing.algs.grass.GrassUtils import GrassUtils",
-      "from processing.algs.grass7.Grass7Utils import Grass7Utils",
-      "from processing.tools.system import isWindows, isMac",
-      # QGIS version
-      "qgis = QGis.QGIS_VERSION",
-      # GRASS versions
-      # grassPath returns "" if called under Linux and if there is no GRASS 
-      # installation
-      "GrassUtils.checkGrassIsInstalled()",
-      "g6 = GrassUtils.isGrassInstalled",
-      "if g6 is True and isWindows():",
-      "  g6 = GrassUtils.grassPath()",
-      "  g6 = re.findall('grass-.*', g6)",
-      "if g6 is True and isMac:",
-      "  g6 = GrassUtils.grassPath()",
-      "  g6 = os.listdir(g6)",
-      "  delim = ';'",
-      "  g6 = delim.join(g6)",
-      "  g6 = re.findall(';(grass[0-9].);', g6)",
-      "Grass7Utils.checkGrass7IsInstalled()",
-      "g7 = Grass7Utils.isGrass7Installed",
-      "if g7 is True and isWindows():",
-      "  g7 = Grass7Utils.grassPath()",
-      "  g7 = re.findall('grass-.*', g7)",
-      "if g7 is True and isMac:",
-      "  g7 = Grass7Utils.grassPath()",
-      "  g7 = os.listdir(g7)",
-      "  delim = ';'",
-      "  g7 = delim.join(g7)",
-      "  g7 = re.findall(';(grass[0-9].);', g7)",
-      # installed SAGA version usable with QGIS
-      "saga = SagaUtils.getSagaInstalledVersion()",
-      # supported SAGA versions
-      "my_dict = SagaAlgorithmProvider.supportedVersions",
-      "saga_versions = my_dict.keys()",
-      "saga_versions.sort()",
-      "ls = []",
-      "ls.append(qgis)",
-      "ls.append(g6)",
-      "ls.append(g7)",
-      "ls.append(saga)",
-      "ls.append(saga_versions)",
-      paste0("with open('", tmp_dir, "/out.csv', 'w') as f:"),
-      "  writer = csv.writer(f)",
-      "  for item in ls:",
-      "    writer.writerow([unicode(item).encode('utf-8')])",
-      "f.close()",
-      "")
-  
-  py_cmd <- paste(py_cmd, collapse = "\n")
-  # harmonize slashes
-  py_cmd <- gsub("\\\\", "/", py_cmd)
-  py_cmd <- gsub("//", "/", py_cmd)
-  # save the Python script
-  cat(py_cmd, file = "py_cmd.py")
-  
-  # build the batch/shell command to run the Python script
-  if (Sys.info()["sysname"] == "Windows") {
-    cmd <- c(cmds$cmd, "python py_cmd.py")
-    # filename
-    f_name <- "batch_cmd.cmd"
-    batch_call <- f_name
-  } else {
-    cmd <- c(cmds$cmd, "/usr/bin/python py_cmd.py")
-    # filename
-    f_name <- "batch_cmd.sh"
-    batch_call <- "sh batch_cmd.sh"
-  }
-  # put each element on its own line
-  cmd <- paste(cmd, collapse = "\n")
-  # save the batch file to the temporary location
-  cat(cmd, file = f_name)
-  # run Python via the command line
-  system(batch_call, intern = TRUE)
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
   
   # retrieve the output
-  out <- utils::read.csv(file.path(tempdir(), "out.csv"), header = FALSE)  
-  out$V1 <- gsub("False", FALSE, out$V1)
-  out$V1 <- gsub("True", TRUE, out$V1)
-  out <- as.list(gsub("\\[|\\]|u'|'", "", out$V1))
-  out[[5]] <- unlist(strsplit(out[[5]], split = ", "))
-  names(out) <- c("qgis_version", "grass6", "grass7", "saga", 
+  out <- 
+    py_run_string("my_session_info = RQGIS.qgis_session_info()")$my_session_info
+  names(out) <- c("qgis_version", "grass6", "grass7", "saga",
                   "supported_saga_versions")
-  # clean up after yourself
-  # unlink(file.path(tmp_dir, "out.csv"))
-  # return the output
+  
+  
+  if (Sys.info()["sysname"] == "Linux" && out$grass7) {
+    # find out which GRASS version is available
+    # my_grass <- searchGRASSX()
+    suppressWarnings(
+      my_grass <- system(paste0("find /usr ! -readable -prune -o -type f ",
+                              "-executable -iname 'grass??' -print"),
+                       intern = TRUE)
+    )
+    
+    # QGIS developer team took care of this issue, so we can eventually delete 
+    # it
+    # if (grepl("72", my_grass)) {
+    #   warning(paste0("QGIS might be still pointing to grass70. In this case ",
+    #                  "you might want to consider using a softlink by running: ",
+    #                  "'sudo ln -s /usr/bin/grass72 /usr/bin/grass70' on the ",
+    #                  "commandline. See also ",
+    #                  "'https://lists.osgeo.org/pipermail/qgis-user/2017-",
+    #                  "January/038907.html'. Then restart R again."))
+    # }
+    
+    # more or less copied from link2GI::searchGRASSX
+    # Problem: sometimes the batch command is interrupted or does not finish...
+    if (length(my_grass) > 0) {
+      install <- lapply(seq(length(my_grass)), function(i) {
+        cmd <- grep(readLines(my_grass), pattern = "cmd_name = \"", 
+                    value = TRUE)
+        cmd <- substr(cmd, gregexpr(pattern = "\"", cmd)[[1]][1] + 
+                        1, nchar(cmd) - 1)
+      })
+    }
+    out$grass7 <- grep("7", unlist(install), value = TRUE)
+  }
+  
+  # clean up after yourself!!
+  py_run_string(
+    "try:\n  del(my_session_info)\nexcept:\  pass")
   out
 }
 
 #' @title Find and list available QGIS algorithms
-#' @description \code{find_algorithms} lists or queries all QGIS algorithms
-#'   which can be used accessed through the command line.
-#' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @param search_term A character to query QGIS functions, i.e. to list only 
-#'   functions which contain the indicated string. If empty (\code{""}), the
-#'   default, all available functions will be returned.
-#' @param name_only If \code{TRUE}, the function returns only the name(s) of the
+#' @description `find_algorithms` lists or queries all QGIS algorithms which can
+#'   be accessed via the QGIS Python API.
+#' @param search_term If (`NULL`), the default, all available functions will be 
+#'   returned. If `search_term` is a character, all available functions will be
+#'   queried accordingly. The character string might also contain a regular
+#'   expression (see examples).
+#' @param name_only If `TRUE`, the function returns only the name(s) of the
 #'   found algorithms. Otherwise, a short function description will be returned
 #'   as well (default).
-#' @param intern Logical, if \code{TRUE} the function captures the command line
-#'   output as an \code{R} character vector (see also 
-#'   \code{\link[base]{system}}).
-#' @details Function \code{find_algorithms} simply calls 
-#'   \code{processing.alglist} using Python.
+#' @param qgis_env Environment settings containing all the paths to run the QGIS
+#'   API. For more information, refer to [set_env()].
+#' @details Function `find_algorithms` simply calls `processing.alglist` using 
+#'   Python.
 #' @return The function returns QGIS function names and short descriptions as an
 #'   R character vector.
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
@@ -262,43 +385,61 @@ qgis_session_info <- function(qgis_env = set_env()) {
 #' # list all available QGIS algorithms on your system
 #' algs <- find_algorithms()
 #' algs[1:15]
-#' # just find all native, i.e. QGIS-algorithms
-#' grep("qgis:", algs, value = TRUE)
 #' # find a function which adds coordinates
 #' find_algorithms(search_term = "add")
+#' # find only QGIS functions
+#' find_algorithms(search_term = "qgis:")
+#' # find QGIS and SAGA functions related to centroid computations
+#' find_algorithms(search_term = "centroid.+(qgis:|saga:)")
 #' }
-
 #' @export
-find_algorithms <- function(search_term = "",
-                            qgis_env = set_env(),
-                            name_only = FALSE,
-                            intern = 
-                              ifelse(Sys.info()["sysname"] == "Windows",
-                                     TRUE, FALSE)) {
+
+find_algorithms <- function(search_term = NULL, name_only = FALSE,
+                            qgis_env = set_env()) {
+  # check if the QGIS application has already been started
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
   
-    algs <- execute_cmds(processing_name = "processing.alglist",
-                         params = shQuote(search_term),
-                         qgis_env = qgis_env,
-                         intern = intern)
-    if (name_only) {
-      algs <- gsub(".*>", "", algs)
-    }
-    # return the result while dismissing empty strings
-    algs[algs != ""]
+  # Advantage of this approach: we are using directly alglist and do not have to
+  # save it in inst
+  # Disadvantage: more processing
+  algs <- py_capture_output(py_run_string("processing.alglist()"))
+  algs <- gsub("\n", "', '", algs)
+  algs <- unlist(strsplit(algs, "', |, '"))
+  algs <- unlist(strsplit(algs, '", '))
+  algs <- gsub("\\['|'\\]|'", "", algs)
+  
+  # quick-and-dirty, maybe there is a more elegant approach...
+  if (Sys.info()["sysname"] == "Windows") {
+    algs <- gsub('\\\\|"', "", shQuote(algs))
+  } else {
+    algs <- gsub('\\\\|"', "", algs)
+  }
+  algs <- algs[algs != ""]
+  
+  # use regular expressions to query all available algorithms
+  if (!is.null(search_term)) {
+    algs <- grep(search_term, algs, value = TRUE)
+  }
+  
+  if (name_only) {
+    algs <- gsub(".*>", "", algs)
+  }
+  # return your result
+  algs
 }
 
 
 #' @title Get usage of a specific QGIS geoalgorithm
-#' @description \code{get_usage} lists all function parameters of a specific 
+#' @description `get_usage` lists all function parameters of a specific 
 #'   QGIS geoalgorithm.
 #' @param alg Name of the function whose parameters are being searched for.
+#' @param intern Logical, if `TRUE` the function captures the command line 
+#'   output as an `R` character vector`. If `FALSE`, the default, the output is
+#'   printed to the console in a pretty way.
 #' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @param intern Logical, if \code{TRUE} the function captures the command line
-#'   output as an \code{R} character vector (see also 
-#'   \code{\link[base]{system}}).
-#' @details Function \code{get_usage} simply calls
-#'   \code{processing.alghelp} of the QGIS Python API.
+#'   more information, refer to [set_env()].
+#' @details Function `get_usage` simply calls
+#'   `processing.alghelp` of the QGIS Python API.
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
 #' @export
 #' @examples
@@ -309,62 +450,69 @@ find_algorithms <- function(search_term = "",
 #' get_usage(alg = "saga:addcoordinatestopoints")
 #' }
 
-get_usage <- function(alg = NULL,
-                      qgis_env = set_env(),
-                      intern = FALSE) {
+get_usage <- function(alg = NULL, intern = FALSE,
+                      qgis_env = set_env()) {
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
+  out <- 
+    py_capture_output(py_run_string(sprintf("processing.alghelp('%s')", alg)))
+  out <- gsub("^\\[|\\]$|'", "", out)
+  out <- gsub(", ", "\n", out)
+  if (intern) {
+    out
+  } else {
+    cat(gsub("\\\\t", "\t", out))
+  }
   
-  execute_cmds(processing_name = "processing.alghelp",
-               params = shQuote(alg),
-               qgis_env = qgis_env,
-               intern = intern)
 }
 
 #' @title Get options of parameters for a specific GIS option
-#' @description \code{get_options} lists all available parameter options for
-#'   the required GIS function.
-#' @param alg Name of the GIS function for which options should be
-#'   returned.
+#' @description `get_options` lists all available parameter options for the 
+#'   required GIS function.
+#' @param alg Name of the GIS function for which options should be returned.
+#' @param intern Logical, if `TRUE` the function captures the command line 
+#'   output as an `R` character vector. If `FALSE`, the default, the output is
+#'   printed to the console in a pretty way.
 #' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @param intern Logical, if \code{TRUE} the function captures the command line
-#'   output as an \code{R} character vector (see also 
-#'   \code{\link[base]{system}}).
-#' @details Function \code{get_options} simply calls
-#'   \code{processing.algoptions} of the QGIS Python API.
+#'   more information, refer to [set_env()].
+#' @details Function `get_options` simply calls `processing.algoptions` of the 
+#'   QGIS Python API.
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
 #' @examples
 #' \dontrun{
 #' get_options(alg = "saga:slopeaspectcurvature")
 #' }
 #' @export
-get_options <- function(alg = NULL,
-                        qgis_env = set_env(),
-                        intern = FALSE) {
-  if (is.null(alg)) {
-    stop("Please specify an algorithm!")
-  }
+get_options <- function(alg = "", intern = FALSE,
+                        qgis_env = set_env()) {
   
-  execute_cmds(processing_name = "processing.algoptions",
-               params = shQuote(alg),
-               qgis_env = qgis_env,
-               intern = intern)
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
+  out <- 
+    py_capture_output(py_run_string(
+      sprintf("processing.algoptions('%s')", alg)))
+  out <- gsub("^\\[|\\]$|'", "", out)
+  out <- gsub(", ", "\n", out)
+  if (intern) {
+    out
+  } else {
+    cat(gsub("\\\\t", "\t", out))
+  }
 }
 
-#' @title Access the QGIS/GRASS online help for a specific (Q)GIS geoalgorihm
-#' @description \code{open_help} opens the online help for a specific (Q)GIS 
+#' @title Access the QGIS/GRASS online help for a specific (Q)GIS geoalgorithm
+#' @description `open_help` opens the online help for a specific (Q)GIS 
 #'   geoalgorithm. This is the online help one also encounters in the QGIS GUI.
 #'   In the case of GRASS algorithms this is actually the GRASS online
 #'   documentation.
 #' @param alg The name of the algorithm for which one wishes to retrieve 
 #'   arguments and default values.
 #' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @details Bar a few exceptions \code{open_help} works for all QGIS, GRASS and
+#'   more information, refer to [set_env()].
+#' @details Bar a few exceptions `open_help` works for all QGIS, GRASS and
 #'   SAGA geoalgorithms. The online help of other third-party providers,
 #'   however, has not been tested so far.
 #' @return The function opens the default web browser, and displays the help for
 #'   the specified algorithm.
-#' @note Please note that \code{open_help} requires a \strong{working Internet 
+#' @note Please note that `open_help` requires a \strong{working Internet 
 #'   connection}.
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
 #' @export
@@ -375,200 +523,51 @@ get_options <- function(alg = NULL,
 #' # GRASS example
 #' open_help(alg = "grass:v.overlay")
 #' }
-open_help <- function(alg = NULL, qgis_env = set_env()) {
+open_help <- function(alg = "", qgis_env = set_env()) {
   
-  if (is.null(alg)) {
-    stop("Please specify an algorithm!")
+  # check if the QGIS application has already been started
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
+  
+  algs <- find_algorithms(name_only = TRUE, qgis_env = qgis_env)
+  if (!alg %in% algs) {
+    stop("The specified algorithm ", alg, " does not exist.")
   }
   
   if (grepl("grass", alg)) {
+    # open GRASS online help
     open_grass_help(alg)
   } else {
     algName <- alg
-    
-    # set the paths
-    cwd <- getwd()
-    on.exit(setwd(cwd))
-    tmp_dir <- tempdir()
-    setwd(tmp_dir)
-    
-    cmds <- build_cmds(qgis_env = qgis_env)
-    py_cmd <- 
-      c(cmds$py_cmd,
-        "from processing.gui.Help2Html import *",
-        "from processing.tools.help import createAlgorithmHelp",
-        "import webbrowser",
-        "import re",
-        # from processing.tools.help import *
-        paste0("alg = Processing.getAlgorithm('", algName, "')"), 
-        # copied from baseHelpForAlgorithm in processing\tools\help.py
-        # find the provider (qgis, saga, grass, etc.)
-        "provider = alg.provider.getName().lower()",
-        # to which group does the algorithm belong (e.g., vector_table_tools)
-        "groupName = alg.group.lower()",
-        # format the groupName in the QGIS way
-        "groupName = groupName.replace('[', '').replace(']', '').replace(' - ', '_')",
-        "groupName = groupName.replace(' ', '_')",
-        "if provider == 'saga':",
-        "  alg2 = alg.getCopy()",
-        "  groupName = alg2.undecoratedGroup",
-        "  groupName = groupName.replace('ta_', 'terrain_analysis_')",
-        "  groupName = groupName.replace('statistics_kriging', 'kriging')",
-        "  groupName = re.sub('^statistics_.*', 'geostatistics', groupName)",
-        "  groupName = re.sub('visualisation', 'visualization', groupName)",
-        "  groupName = re.sub('_preprocessor', '_hydrology', groupName)",
-        "  groupName = groupName.replace('sim_', 'simulation_')",
-        # retrieve the command line name (worked for 2.8...)
-        # "cmdLineName = alg.commandLineName()",
-        # "algName = cmdLineName[cmdLineName.find(':') + 1:].lower()",
-        # for 2.14 we cannot use the algorithm name 
-        # (now you have to test all SAGA and QGIS functions again...)
-        "algName = alg.name.lower().replace(' ', '-')",
-        
-        # just use valid characters
-        "validChars = ('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRS' +
-        'TUVWXYZ0123456789_')",
-        "safeGroupName = ''.join(c for c in groupName if c in validChars)",
-        "validChars = validChars + '-'",
-        "safeAlgName = ''.join(c for c in algName if c in validChars)",
-        # which QGIS version are we using
-        "version = '.'.join(QGis.QGIS_VERSION.split('.')[0:2])",
-        # build the html to the help file
-        "url = ('https:///docs.qgis.org/%s/en/docs/user_manual/' +
-        'processing_algs/%s/%s.html#%s') % (version, provider,
-        safeGroupName, safeAlgName)",
-        
-        
-        # suppress error messages raised by the browser, e.g.,
-        # console.error: CustomizableUI: 
-        # TypeError: aNode.previousSibling is null -- 
-        #  resource://app/modules/CustomizableUI.jsm:4294
-        # Solution was found here:
-        # paste0("http://stackoverflow.com/questions/2323080/",
-        #        "how-can-i-disable-the-webbrowser-message-in-python")
-        "savout = os.dup(1)",
-        "os.close(1)",
-        "os.open(os.devnull, os.O_RDWR)",
-        "try:",
-        "  webbrowser.open(url)",
-        "finally:",
-        "  os.dup2(savout, 1)"
-        )
-    # each py_cmd element should go on its own line
-    py_cmd <- paste(py_cmd, collapse = "\n")
-    # harmonize slashes
-    py_cmd <- gsub("\\\\", "/", py_cmd)
-    py_cmd <- gsub("//", "/", py_cmd)
-    # save the Python script
-    cat(py_cmd, file = "py_cmd.py")
-    # build the batch/shell command to run the Python script
-    if (Sys.info()["sysname"] == "Windows") {
-      cmd <- c(cmds$cmd, "python py_cmd.py")
-      # filename
-      f_name <- "batch_cmd.cmd"
-      batch_call <- f_name
-    } else {
-      cmd <- c(cmds$cmd, "/usr/bin/python py_cmd.py")
-      # filename
-      f_name <- "batch_cmd.sh"
-      batch_call <- "sh batch_cmd.sh"
-    }
-    # put each element on its own line
-    cmd <- paste(cmd, collapse = "\n")
-    # save the batch file to the temporary location
-    cat(cmd, file = f_name)
-    # run Python via the command line
-    system(batch_call, intern = TRUE)
+    # open the QGIS online help
+    py_run_string(sprintf("RQGIS.open_help('%s')", algName))
   }
-}
-
-#' @title Automatically retrieve GIS function arguments
-#' @description \code{get_args} uses \code{\link{get_usage}} to retrieve 
-#'   function arguments of a GIS function.
-#' @param alg A character specifying the GIS algorithm whose arguments one
-#'   wishes to retrieve.
-#' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @return \code{get_args} returns a list with the function arguments of a 
-#'   specific QGIS geoalgorithm. Later on, the specified function arguments 
-#'   should serve as input for \code{\link{run_qgis}}'s params argument.
-#' @author Jannes Muenchow, Victor Olaya, QGIS core team
-#' @export
-#' @examples
-#' \dontrun{
-#' get_args(alg = "qgis:addfieldtoattributestable")
-#' }
-get_args <- function(alg = NULL, qgis_env = set_env()) {
-  
-  if (is.null(alg)) {
-    stop("Please specify an algorithm!")
-  }
-  
-  # get the usage of a function
-  tmp <- get_usage(alg = alg, qgis_env = qgis_env, intern = TRUE)
-  # check if algorithm could be found
-  if (any(grepl("Algorithm not found", tmp))) {
-    stop("Specified algorithm was not found!")
-  }
-  
-  # dismiss everything prior to ALGORITHM
-  tmp <- tmp[grep("ALGORITHM: ", tmp):length(tmp)]
-  # extract the arguments
-  ind <- which(tmp == "")
-  my_diff <- c(0, diff(ind))
-  # extract the arguments
-  if (any(my_diff == 1)) {
-    ind <- ind[(my_diff == 1)] - 1
-    # okay, for now let's hardcode it assuming that only the first double space
-    # indicates the break between function arguments and options...
-    args <- tmp[1:ind[1]]
-    # extract the options
-    # opts <- tmp[ind:length(tmp)]
-  } else {
-    args <- tmp
-  }
-  args <- grep("\t", args, value = TRUE)
-  # extract the domain
-  # domain <- gsub(".*<|>", "", args)
-  # dismiss the tab and everything following a space
-  args <- gsub(" .*|\t", "", args)
-  
-  # return your result, in this case just the arguments
-  # in the future, we might want to return the options and the domains as well
-  arg_list <- vector(mode = "list", length = length(args))
-  names(arg_list) <- args
-  # define the default values: If you have an instance of a QGIS object 
-  # representing the layer, you can also pass it as parameter. If the input is 
-  # optional and you do not want to use any data object, use None (see also
-  # https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html).
-  lapply(arg_list, function(x) x <- "None")
 }
 
 #' @title Get GIS arguments and respective default values
-#' @description\code{get_args_man} retrieves automatically function arguments 
-#' and respective default values for a given QGIS geoalgorithm.
-#' @param alg The name of the algorithm for which one wishes to retrieve
+#' @description`get_args_man` retrieves automatically function arguments and 
+#' respective default values for a given QGIS geoalgorithm.
+#' @param alg The name of the algorithm for which one wishes to retrieve 
 #'   arguments and default values.
 #' @param options Sometimes one can choose between various options for a 
-#'   function argument. Setting option to \code{TRUE} will automatically assume 
-#'   one wishes to use the first option (default: \code{FALSE}).
+#'   function argument. Setting option to `TRUE`, the default,  will
+#'   automatically assume one wishes to use the first option (QGIS GUI
+#'   behavior).
 #' @param qgis_env Environment containing all the paths to run the QGIS API. For
-#'   more information, refer to \code{\link{set_env}}.
-#' @details \code{get_args_man} basically mimics the behavior of the QGIS GUI. 
-#'   That means, for a given GIS algorithm, it captures automatically all 
-#'   arguments and default values. In the case that a function argument has
-#'   several options, one can indicate to use the first option (see also
-#'   \code{\link{get_options}}), which is the QGIS GUI default behavior.
+#'   more information, refer to [set_env()].
+#' @details `get_args_man` basically mimics the behavior of the QGIS GUI. That 
+#'   means, for a given GIS algorithm, it captures automatically all arguments 
+#'   and default values. In the case that a function argument has several 
+#'   options, one can indicate to use the first option (see also 
+#'   [get_options()]), which is the QGIS GUI default behavior.
 #' @return The function returns a list whose names correspond to the function 
-#'   arguments one needs to specify. The list elements correspond to the argument
-#'   specifications. The specified function arguments can serve as input for 
-#'   \code{\link{run_qgis}}'s params argument. Please note that although 
-#'   \code{get_args_man} tries to retrieve default values, one still needs to 
-#'   specify some function arguments manually such as the input and the output 
-#'   layer.
+#'   arguments one needs to specify. The list elements correspond to the 
+#'   argument specifications. The specified function arguments can serve as 
+#'   input for [run_qgis()]'s params argument. Please note that although 
+#'   `get_args_man` tries to retrieve default values, one still needs to specify
+#'   some function arguments manually such as the input and the output layer.
 #' @note Please note that some default values can only be set after the user's 
 #'   input. For instance, the GRASS region extent will be determined 
-#'   automatically by \code{\link{run_qgis}} if left blank.
+#'   automatically by [run_qgis()] if left blank.
 #' @export
 #' @author Jannes Muenchow, Victor Olaya, QGIS core team
 #' @examples 
@@ -577,183 +576,355 @@ get_args <- function(alg = NULL, qgis_env = set_env()) {
 #' # and using the option argument
 #' get_args_man(alg = "qgis:addfieldtoattributestable", options = TRUE)
 #' }
-get_args_man <- function(alg = NULL, options = FALSE, qgis_env = set_env()) {
-
-  if (is.null(alg)) {
-    stop("Please specify an algorithm!")
-  }
-  # find out if it's necessary to obtain default values for
-  # GRASS_REGION_CELLSIZE_PARAMETER, etc.
-
-  # set the paths
-  cwd <- getwd()
-  on.exit(setwd(cwd))
-  tmp_dir <- tempdir()
-  setwd(tmp_dir)
+get_args_man <- function(alg = "", options = TRUE, 
+                         qgis_env = set_env()) {
+  # check if the QGIS application has already been started
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
   
-  # build the raw scripts
-  cmds <- build_cmds(qgis_env)
-  
-  # extend the python command
-  py_cmd <- 
-    c(cmds$py_cmd,
-      "from processing.core.Processing import Processing",
-      "from processing.core.parameters import ParameterSelection",
-      "from itertools import izip",
-      "import csv",
-      # retrieve the algorithm
-      paste0("alg = Processing.getAlgorithm('", alg, "')"),
-      "vals = []",
-      "params = []",
-      "opts = list()",
-      "if alg is None:",
-      paste0("  with open('", tmp_dir, "\\output.csv'", ", 'wb') as f:"),
-      "    writer = csv.writer(f)",
-      "    writer.writerow(['params'])",
-      "    writer.writerow(['Specified algorithm does not exist!'])",
-      "    f.close()",
-      "else:",
-      "  alg = alg.getCopy()",
-      # retrieve function arguments and defaults
-      "  for param in alg.parameters:",
-      "    params.append(param.name)",
-      "    vals.append(param.getValueAsCommandLineParameter())",
-      "    opts.append(isinstance(param, ParameterSelection))",
-      "  for out in alg.outputs:",
-      "    params.append(out.name)",
-      "    vals.append(out.getValueAsCommandLineParameter())",
-      "    opts.append(isinstance(out, ParameterSelection))",
-      # write the three lists (arguments, defaults, options) to a csv-file
-      paste0("  with open('", tmp_dir, "\\output.csv'", ", 'wb') as f:"),
-      "    writer = csv.writer(f)",
-      "    writer.writerow(['params', 'vals', 'opts'])",
-      "    writer.writerows(izip(params, vals, opts))",
-      "    f.close()",
-      ""
-    )
-  # each py_cmd element should go on its own line
-  py_cmd <- paste(py_cmd, collapse = "\n")
-  # harmonize slashes
-  py_cmd <- gsub("\\\\", "/", py_cmd)
-  py_cmd <- gsub("//", "/", py_cmd)
-  # save the Python script
-  cat(py_cmd, file = "py_cmd.py")
-
-  # build the batch/shell command to run the Python script
-  if (Sys.info()["sysname"] == "Windows") {
-    cmd <- c(cmds$cmd, "python py_cmd.py")
-    # filename
-    f_name <- "batch_cmd.cmd"
-    batch_call <- f_name
-  } else {
-    cmd <- c(cmds$cmd, "/usr/bin/python py_cmd.py")
-    # filename
-    f_name <- "batch_cmd.sh"
-    batch_call <- "sh batch_cmd.sh"
+  algs <- find_algorithms(name_only = TRUE, qgis_env = qgis_env)
+  if (!alg %in% algs) {
+    stop("The specified algorithm ", alg, " does not exist.")
   }
-  # put each element on its own line
-  cmd <- paste(cmd, collapse = "\n")
-  # save the batch file to the temporary location
-  cat(cmd, file = f_name)
-  # run Python via the command line
-  system(batch_call, intern = TRUE)
   
-  # retrieve the Python output
-  tmp <- utils::read.csv(file.path(tmp_dir, "output.csv"), header = TRUE, 
-                         stringsAsFactors = FALSE)
-  # If a wrong algorithm (-> alg is None) name was provided, stop the
-  # function
-  if (tmp$params[1] == "Specified algorithm does not exist!") {
-    stop("Algorithm '", alg, "' does not exist")
-  }
+  args <- py_run_string(
+    sprintf("algorithm_params = RQGIS.get_args_man('%s')",
+            alg))$algorithm_params
   
   # If desired, select the first option if a function argument has several
   # options to choose from
   if (options) {
-    tmp[tmp$opts == "True", "vals"] <- "0"
+    args$vals[args$opts] <- "0"
   }
-  
-  # convert the dataframe into a list
-  args <- as.list(tmp$vals)
-  names(args) <- trimws(tmp$params)
-  
-  # sometime None, True or False might be 'shellquoted'
-  # we have to take care of this
-  # well, maybe not necessary:
-  # http://stackoverflow.com/questions/28204507/remove-backslashes-from-character-string
-  # args <- lapply(args, function(x) as.character(noquote(x)))
-  # clean up after yourself
-  unlink(file.path(tmp_dir, "output.csv"))
+  # clean up after yourself!!
+  py_run_string(
+    "try:\n  del(algorithm_params)\nexcept:\  pass")
   # return your result
-  args
+  out <- as.list(args$vals)
+  names(out) <- args$params
+  out
 }
 
-#'@title Interface to QGIS commands
-#'@description \code{run_qgis} calls QGIS algorithms from within R while passing
-#'  the corresponding function arguments.
-#'@param alg Name of the GIS function to be used (see 
-#'  \code{\link{find_algorithms}}).
-#'@param params A list of geoalgorithm function arguments that should be used in
-#'  conjunction with the selected (Q)GIS function (see 
-#'  \code{\link{get_args_man}}). Please make sure to provide all function 
-#'  arguments in the correct order. To make sure this is the case, it is 
-#'  recommended to use the convenience function \code{\link{get_args_man}}.
-#'@param check_params If \code{TRUE} (default), it will be checked if all 
-#'  geoalgorithm function arguments were provided in the correct order.
-#'@param show_msg Logical, if \code{TRUE}, Python messages that occured during
-#'  the algorithm execution will be shown.
-#'@param load_output Character vector containing paths to (an) output file(s) in
-#'  order to load the QGIS output directly into R (optional). If 
-#'  \code{load_output} consists of more than one element, a list will be 
-#'  returned. See the example section for more details.
-#'@param qgis_env Environment containing all the paths to run the QGIS API. For
-#'  more information, refer to \code{\link{set_env}}.
-#'@details This workhorse function calls the QGIS Python API through the command
-#'  line. Specifically, it calls \code{processing.runalg}.
-#'@return If not otherwise specified, the function saves the QGIS generated 
-#'  output files in a temporary folder. Optionally, function parameter 
-#'  \code{load_output} loads spatial QGIS output (vector and raster data) into
-#'  R.
-#'@note Please note that one can also pass spatial R objects as input parameters
-#'  where suitable (e.g., input layer, input raster). Supported formats are
-#'  \code{\link[sp]{SpatialPointsDataFrame}}-, 
-#'  \code{\link[sp]{SpatialLinesDataFrame}}-, 
-#'  \code{\link[sp]{SpatialPolygonsDataFrame}}- and 
-#'  \code{\link[raster]{raster}}-objects. See the example section for more 
-#'  details.
-#'  
-#' GRASS users do not have to specify manually the GRASS region extent (function
-#' argument GRASS_REGION_PARAMETER). If "None", \code{run_qgis} will
-#' automatically retrieve the region extent based on the input layers.
-#' @author Jannes Muenchow, Victor Olaya, QGIS core team
+#' @title Specifying QGIS geoalgorithm parameters the R way
+#' @description The function lets the user specify QGIS geoalgorithm parameters 
+#'   as R named arguments or a a parameter-argument list. When omitting required
+#'   parameters, defaults will be used if available as derived from 
+#'   [get_args_man()]. Additionally, the function checks thoroughly the 
+#'   user-provided parameters and arguments.
+#' @param alg The name of the geoalgorithm to use.
+#' @param ... Triple dots can be used to specify QGIS geoalgorithm arguments as 
+#'   R named arguments.
+#' @param params Parameter-argument list for a specific geoalgorithm, see 
+#'   [get_args_man()] for more details. Please note that you can either specify 
+#'   R arguments directly via the triple dots (see above) or via the 
+#'   parameter-argument list. However, you may not mix the two methods.
+#' @param qgis_env Environment containing all the paths to run the QGIS API. For
+#'   more information, refer to [set_env()].
+#' @return The function returns the complete parameter-argument list for a given
+#'   QGIS geoalgorithm. The list is constructed with the help of 
+#'   [get_args_man()] while considering the R named arguments or the 
+#'   `params`-parameter specified by the user as additional input. If available,
+#'   the function returns the default values for all parameters which were not 
+#'   specified.
+#' @details In detail, the function performs following actions and 
+#'   parameter-argument checks: 
+#'   \itemize{
+#'   \item Were the right parameter names used? 
+#'   \item Were the correct argument values provided? 
+#'   \item The function collects all necessary arguments (to run QGIS) and
+#'   respective default values which were not set by the user with the help of
+#'   [get_args_man()].
+#'   \item If an argument value corresponds to a spatial object residing in R 
+#'   (`sp`-, `sf`- or `raster`-objects are supported), the function will save 
+#'   the spatial object to a temporary folder, and use the corresponding file 
+#'   path to replace the spatial object in the parameter-argument list. If the 
+#'   QGIS geoalgorithm parameter belongs to the 
+#'   `ParameterMultipleInput`-instance class (see for example 
+#'   `get_usage(grass7:v.patch)`) you may either use a character-string 
+#'   containing the paths to the spatial objects separated by a semi-colon 
+#'   (e.g., "shape1.shp;shape2.shp;shape3.shp" - see also [QGIS 
+#'   documentation](https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html))
+#'   or provide a [base::list()] containing the spatial objects.
+#'   \item If the user only specified the name of an output file (e.g.
+#'   "slope.asc") and not a complete path, the function will save the output in
+#'   the temporary folder, i.e. to `file.path(tempdir(), "slope.asc")`.
+#'   \item If a parameter accepts as arguments values from a selection, the
+#'   function replaces verbal input by the corresponding number (required by the
+#'   QGIS Python API). Please refer to the example section for more details, and
+#'   to [get_options()] for valid options for a given geoalgorithm.
+#'  \item If `GRASS_REGION_PARAMETER` is "None" (the QGIS default), `run_qgis` 
+#'  will automatically determine the region extent based on the user-specified 
+#'  input layers. If you do want to specify the `GRASS_REGION_PARAMETER` 
+#'  yourself, please do it in accordance with the [QGIS 
+#'  documentation](https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html),
+#'  i.e., use a character string and separate the coordinates with a comma: 
+#'  "xmin, xmax, ymin, ymax".
+#'   }
+#' @note The function was inspired by [rgrass7::doGRASS()].
+#' @author Jannes Muenchow
 #' @export
 #' @importFrom sp SpatialPointsDataFrame SpatialPolygonsDataFrame
 #' @importFrom sp SpatialLinesDataFrame
-#' @importFrom raster raster
+#' @importFrom raster raster writeRaster extent
+#' @importFrom sf write_sf st_as_sf
+#' @importFrom rgdal ogrInfo writeOGR readOGR GDALinfo
+#' @importFrom utils capture.output
 #' @examples
 #' \dontrun{
-#' # set the environment
-#' my_env <- set_env()
-#' # find out how a function is called
-#' find_algorithms(search_term = "add", qgis_env = my_env)
-#' # specify parameters
-#' params <- get_args_man("saga:addcoordinatestopoints", qgis_env = my_env)
-#' # load random_points - a SpatialPointsDataFrame
-#' data(random_points, package = "RQGIS")
-#' params$INPUT <- random_points
-#' # Here I specify a SpatialPointsDataFrame as input, but one could also
-#' # specify the path to a spatial object file (e.g., shapefile), e.g.;
-#' # params$INPUT <- "random_points.shp"
-#' params$OUTPUT <- "output.shp"
-#' # Run the QGIS API and load its output into R
-#' run_qgis(alg = "saga:addcoordinatestopoints",
-#'          params = params,
-#'          load_output = params$OUTPUT,
-#'          qgis_env = my_env)
+#' data(dem, package = "RQGIS")
+#' alg <- "grass7:r.slope.aspect"
+#' get_usage(alg)
+#' # 1. using R named arguments
+#' pass_args(alg, elevation = dem, slope = "slope.asc")
+#' # 2. doing the same with a parameter argument list
+#' pass_args(alg, params = list(elevation = dem, slope = "slope.asc"))
+#' # 3. verbal input replacement (note that "degrees" will be replaced by 0)
+#' get_options(alg)
+#' pass_args(alg, elevation = dem, format = "degrees")
+#' }
+
+pass_args <- function(alg, ..., params = NULL, qgis_env = set_env()) {
+  dots <- list(...)
+  if (!is.null(params) && (length(dots) > 0))
+    stop(paste("Use either QGIS parameters as R arguments,",
+               "or as a parameter argument list object, but not both"))
+  if (length(dots) > 0) {
+    params <- dots
+  }
+  
+  dups <- duplicated(names(params))
+  if (any(dups)) {
+    stop("You have specified following parameter(s) more than once: ",
+         paste(names(params)[dups], collapse = ", "))
+  }
+  
+  # collect all the function arguments and respective default values for the
+  # specified geoalgorithm
+  params_all <- get_args_man(alg, options = TRUE)
+  
+  # check if there are too few/many function arguments
+  ind <- setdiff(names(params), names(params_all))
+  if (length(ind) > 0) {
+    stop(paste(sprintf("'%s'", ind), collapse = ", "), 
+         " is/are (an) invalid function argument(s). \n\n",
+         sprintf("'%s'", alg), " allows following function arguments: ",
+         paste(sprintf("'%s'", names(params_all)), collapse = ", "))
+  }
+  
+  # if function arguments are missing, QGIS will use the default since we submit
+  # our parameter-arguments as a Python-dictionary (see Processing.runAlgorithm)
+  # nevertheless, we will indicate them already here since we have already 
+  # retrieved them, it makes our processing more transparent, and it makes life
+  # easier in run_qgis
+  ind <- setdiff(names(params_all), names(params))
+  if (length(ind) > 0) {
+    params_2 <- params_all
+    params_2[names(params)] <- params
+    params <- params_2
+    rm(params_2)
+  }
+  
+  # retrieve the options for a specific parameter
+  opts <- py_run_string(sprintf("opts = RQGIS.get_options('%s')", alg))$opts
+  # add number notation in Python lingo, i.e. count from 0 to the length of the
+  # vector minus 1
+  opts <- lapply(opts, function(x) {
+    data.frame(name = x, number = 0:(length(x) - 1), stringsAsFactors = FALSE)
+  })
+  
+  int <- intersect(names(params), names(opts))
+  ls_1 <- lapply(int, function(x) {
+    # if the user specified a named notation replace it by number notation if
+    # the option does not appear in the dictionary due to a typo (e.g., area2
+    # instead of area), Python will inform the user that area2 is a wrong
+    # parameter value
+    if (grepl("saga:", alg)) {
+      saga_test <- gsub("\\[\\d\\] ", "", opts[[x]]$name)
+    } else {
+      # otherwise just duplicate the possible argument values
+      saga_test <- opts[[x]]$name
+    }
+    # replace verbal notation by number notation
+    if (params[[x]] %in% c(opts[[x]]$name, saga_test)) {
+      opts[[x]][opts[[x]]$name == params[[x]] | saga_test == params[[x]],
+                "number"]
+    } else {
+      # otherwise return the user input but check if the number is ok given the
+      # user has specified a number
+      test <- suppressWarnings(try(as.numeric(params[[x]]), silent = TRUE))
+      if (!is.na(test)) {
+        if (!test %in% opts[[x]]$number) {
+          stop(x, " only accepts these values: ",
+               paste(opts[[x]]$number, collapse = ", "), 
+               "\nYou specified: ", test)
+        }
+      }
+      params[[x]]
+    }
+  })
+  # replace the named input by number input in the parameter-argument list
+  params[int] <- ls_1
+  
+  # Save Spatial-Objects (sp, sf and raster)
+  # here, we would like to retrieve the type type of the argument (which is list
+  # element 4)
+  out <- py_run_string(sprintf("out = RQGIS.get_args_man('%s')", alg))$out
+  params[] <- save_spatial_objects(params = params, 
+                                   type_name = out$type_name)
+  
+  # Find out what the output names are
+  out_names <- out$params[out$output]
+  # clean up after yourself!!
+  py_run_string(
+    "try:\n  del(out_names)\nexcept:\  pass")  
+  
+  # if the user has only specified an output filename without a directory path,
+  # make sure that the output will be saved to the temporary R folder (not doing
+  # so could sometimes save the output in the temporary QGIS folder)
+  # if the user has not specified any output files, nothing happens
+  int <- intersect(names(params), out_names)
+  params[int] <- lapply(params[int], function(x) {
+    if (basename(x) != "None" && dirname(x) == ".") {
+      file.path(tempdir(), x)
+    } else {
+      x
+    }
+  })
+  
+  # set the bbox in the case of GRASS functions if it hasn't already been 
+  # provided (if there are more of these 3rd-party based specifics, put them in
+  # a new function)
+  if (grepl("grass7?:", alg) &&
+      grepl("None", params$GRASS_REGION_PARAMETER)) {
+    # run through the arguments and check if we can extract a bbox. While doing
+    # so, dismiss the output arguments. Not doing so could cause R to crash
+    # since the output-file might already exist. For instance, the already
+    # existing output might have another CRS.
+    ext <- get_grp(params = params[!out$output], 
+                   type_name = out$type_name[!out$output])
+  # final bounding box in the QGIS/GRASS notation
+   params$GRASS_REGION_PARAMETER <- paste(ext, collapse = ",")
+  }
+  # make sure function arguments are in the correct order is not srictly
+  # necessary any longer since we use a Python dictionary to pass our arguments.
+  # However, otherwise, the user might become confused... and for
+  # RQGIS.check_args the correct order is important as well! Doing the check
+  # here has also the advantage that the function tells the user all missing
+  # function arguments, QGIS returns only one at a time
+  params <- params[names(params_all)]
+  check <- py_run_string(sprintf("check = RQGIS.check_args('%s', %s)",alg, 
+                                 py_unicode(r_to_py(unlist(params)))))$check
+  # stop the function if required arguments were not supplied
+  if (length(check) > 0) {
+    stop(sprintf("Invalid argument value %s for parameter %s\n", 
+                 check, names(check)))
+  }
+  # return your result
+  params
+}
+
+#'@title Interface to QGIS commands
+#'@description `run_qgis` calls QGIS algorithms from within R while passing the 
+#'  corresponding function arguments.
+#'@param alg Name of the GIS function to be used (see [find_algorithms()]).
+#'@param ... Triple dots can be used to specify QGIS geoalgorithm arguments as R
+#'  named arguments. For more details, please refer to [pass_args()].
+#'@param params Parameter-argument list for a specific geoalgorithm. Please note
+#'  that you can either specify R named arguments directly via the triple dots 
+#'  (see above) or via a parameter-argument list. However, you may not mix the 
+#'  two methods. See the example section, [pass_args()] and [get_args_man()] for
+#'  more details.
+#'@param load_output If `TRUE`, all QGIS output files ([sf::sf()]-object in the 
+#'  case of vector data and [raster::raster()]-object in the case of a raster) 
+#'  specified by the user (i.e. the user has to indicate output files) will be 
+#'  loaded into R. A list will be returned if there is more than one output file
+#'  (e.g., `grass7:r.slope.aspect`). See the example section for more details.
+#'@param check_params If `TRUE` (default), it will be checked if all 
+#'  geoalgorithm function arguments were provided in the correct order 
+#'  (deprecated).
+#'@param show_msg Logical, if `TRUE`, Python messages that occurred during the 
+#'  algorithm execution will be shown (deprecated).
+#'@param qgis_env Environment containing all the paths to run the QGIS API. For 
+#'  more information, refer to [set_env()].
+#'@details This workhorse function calls the QGIS Python API, and specifically 
+#'  `processing.runalg`.
+#'@return The function prints a list (named according to the output parameters) 
+#'  containing the paths to the files created by QGIS. If not otherwise 
+#'  specified, the function saves the QGIS generated output files to a 
+#'  temporary folder (created by QGIS). Optionally, function parameter 
+#'  `load_output` loads spatial QGIS output (vector and raster data) into R.
+#'@note Please note that one can also pass spatial R objects as input parameters
+#'  where suitable (e.g., input layer, input raster). Supported formats are 
+#'  [sp::SpatialPointsDataFrame()]-, [sp::SpatialLinesDataFrame()]-, 
+#'  [sp::SpatialPolygonsDataFrame()]-, [sf::sf()]- (of class `sf`, `sfc` as well
+#'  as `sfg`), and [raster::raster()]-objects. See the example section for more 
+#'  details.
+#'  
+#'  GRASS users do not have to specify manually the GRASS region extent 
+#'  (function argument GRASS_REGION_PARAMETER). If "None" (the QGIS default), 
+#'  `run_qgis` (see [pass_args()] for more details) will automatically determine
+#'  the region extent based on the user-specified input layers. If you do want 
+#'  to specify it yourself, please do it in accordance with the [QGIS 
+#'  documentation](https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html),
+#'  i.e. use a character string and separate the coordinates with a comma: 
+#'  "xmin, xmax, ymin, ymax".
+#'  
+#'@author Jannes Muenchow, Victor Olaya, QGIS core team
+#'@export
+#'@importFrom sf st_read
+#'@importFrom raster raster
+#' @examples
+#' \dontrun{
+#' # calculate the slope of a DEM
+#' # load dem - a raster object
+#' data(dem, package = "RQGIS")
+#' # find out the name of a GRASS function with which to calculate the slope
+#' find_algorithms(search_term = "grass7.*slope")
+#' # find out how to use the function
+#' alg <- "grass7:r.slope.aspect"
+#' get_usage(alg)
+#' # 1. run QGIS using R named arguments, and load the QGIS output back into R
+#' slope <- run_qgis(alg, elevation = dem, slope = "slope.asc", 
+#'                   load_output = TRUE)
+#' # 2. doing the same with a parameter-argument list
+#' params <- list(elevation = dem, slope = "slope.asc")
+#' slope <- run_qgis(alg, params = params, load_output = TRUE)
+#' # 3. calculate the slope, the aspect and the pcurvature. 
+#' terrain <- run_qgis(alg, elevation = dem, slope = "slope.asc", 
+#'                     aspect = "aspect.asc", pcurvature = "pcurv.asc",
+#'                     load_output = TRUE)
+#' # the three output rasters are returned in a list of length 3
+#' terrain
 #'}
-run_qgis <- function(alg = NULL, params = NULL, check_params = TRUE,
-                     show_msg = TRUE, load_output = NULL,
+
+run_qgis <- function(alg = NULL, ..., params = NULL, load_output = FALSE,
+                     check_params = TRUE, show_msg = TRUE,
                      qgis_env = set_env()) {
+
+  if (!missing(check_params)) {
+    warning(paste("Argument check_params is deprecated; please do not use it", 
+                  "any longer. run_qgis now automatically checks all given", 
+                  "QGIS parameters."), 
+            call. = FALSE)
+  }
+  # check if the QGIS application has already been started
+  tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
+  
+  # check under Linux which GRASS version is in use. If its GRASS72 the user 
+  # might have to add a softlink due to as QGIS bug 
+  # QGIS developer core team took care of this issue (at least since QGIS
+  # 2.14.13), so we can eventually delete this
+  
+  # if (Sys.info()["sysname"] == "Linux" & grepl("grass7", alg)) {
+  #   qgis_session_info(qgis_env)
+  # }
+
+  if (!missing(show_msg)) {
+    warning(paste("Argument show_msg is deprecated; please do not use it", 
+                  "any longer. run_qgis now always return any Python (error)", 
+                  "output"), 
+            call. = FALSE)
+  }
+  
   # check if alg is qgis:vectorgrid
   if (alg == "qgis:vectorgrid") {
     stop("Please use qgis:creategrid instead of qgis:vectorgrid!")
@@ -765,174 +936,88 @@ run_qgis <- function(alg = NULL, params = NULL, check_params = TRUE,
                "Please use 'grass7:v.extract' instead."))
   }
   
-  # check if all necessary function arguments were supplied
-  args <- list(alg, params)
-  ind <- mapply(is.null, args)
-  if (any(ind)) {
-    stop("Please specify: ", paste(args[ind], collapse = ", "))
-  }
   
-  # check if all arguments were specified in the correct order
-  if (check_params) {
-    test <- get_args_man(alg, qgis_env = qgis_env)  
-    
-    # check if there are too few/many function arguments
-    if (length(params) != length(test)) {
-      ifelse(length(params) > length(test),
-             stop("Unknown function argument(s): ", 
-                  paste(setdiff(names(params), names(test)), collapse = ", ")),
-             stop("Function argument(s) ", 
-                  paste(setdiff(names(test), names(params)), collapse = ", "),
-                  "are missing"))
-    }
-    
-    # check if all function arguments are in the correct order
-    ind <- names(test) != names(params)
-    if (any(ind)) {
-      stop("Function argument(s) ", 
-           paste(names(params)[ind], collapse = ", "),
-           " should be ",
-           paste(names(test)[ind], collapse = ", "))
-    }
-  }
+  # construct a parameter-argument list using get_args_man and user input
+  params <- pass_args(alg, ..., params = params, qgis_env = qgis_env)  
+
+  # build the Python command 
+  # r_to_py(params) would also create a dictionary which would be a rather
+  # elegant solution. But there are two problems: First, we did not get rid off
+  # strange/incomplete shell quotes (though that might not be an issue here,
+  # since we are going to use Python via the tunnel and the strange/incomplete
+  # shellquotes were returned by Python). Secondly, True, False and None should
+  # be unquoted which can be only achieved in R by collapsing all arguments into
+  # one long string. Maybe it would work even if we did not explicitly take care
+  # of this. But to be on the safe side, we proceed as follows:
   
-  # save Spatial-Objects (sp and raster)
-  # define temporary folder
-  tmp_dir <- tempdir()
-  params[] <- lapply(seq_along(params), function(i) {
-    tmp <- class(params[[i]])
-    # check if the function argument is a SpatialObject
-    if (grepl("^Spatial(Points|Lines|Polygons)DataFrame$", tmp) && 
-        attr(tmp, "package") == "sp") {
-      rgdal::writeOGR(params[[i]], dsn = tmp_dir, 
-                      layer = names(params)[[i]],
-                      driver = "ESRI Shapefile",
-                      overwrite_layer = TRUE)
-      # return the result
-      file.path(tmp_dir, paste0(names(params)[[i]], ".shp"))
-    } else if (tmp == "RasterLayer") {
-      fname <- file.path(tmp_dir, paste0(names(params)[[i]], ".asc"))
-      raster::writeRaster(params[[i]], filename = fname, format = "ascii", 
-                          prj = TRUE, overwrite = TRUE)
-      # return the result
-      fname
-    } else {
-      params[[i]]
-    }
-  })
-  
-  # set the bbox in the case of GRASS functions if it hasn't already been 
-  # provided (if there are more of these 3rd-party based specifics, put them in
-  # a new function)
-  if ("GRASS_REGION_PARAMETER" %in% names(params) && 
-      grepl("None", params$GRASS_REGION_PARAMETER)) {
-    # dismiss the last argument since it frequently corresponds to the output if
-    # the output was created before using another CRS, the function might crash
-    ext <- params[-length(params)]
-    # run through the arguments and check if we can extract a bbox
-    ext <- lapply(ext, function(x) {
-      # We cannot simply use gsub as we have done before (gsub("[.].*",
-      # "",basename(x))) if the filename itself also contains dots, e.g.,
-      # gis.osm_roads_free_1.shp 
-      # We could use regexp to cut off the file extension
-      # my_layer <- stringr::str_extract(basename(x), "[A-z].+[^\\.[A-z]]")
-      # but let's use an already existing function
-      my_layer <- tools::file_path_sans_ext(basename(as.character(x)))
-      # determine bbox in the case of a vector layer
-      tmp <- try(expr = rgdal::ogrInfo(dsn = x, layer = my_layer)$extent,
-                 silent = TRUE)
-      if (!inherits(tmp, "try-error")) {
-        # check if this is always this way (xmin, ymin, xmax, ymax...)
-        raster::extent(tmp[c(1, 3, 2, 4)])
-      } else {
-        # determine bbox in the case of a raster
-        ext <- try(expr = rgdal::GDALinfo(x, returnStats = FALSE),
-                   silent = TRUE)
-        # check if it is still an error
-        if (!inherits(ext, "try-error")) {
-          # xmin, xmax, ymin, ymax
-          raster::extent(c(ext["ll.x"], 
-                           ext["ll.x"] + ext["columns"] * ext["res.x"],
-                           ext["ll.y"],
-                           ext["ll.y"] + ext["rows"] * ext["res.y"]))
-        } else {
-          NA
-        }
-      }
-    })
-    # now that we have possibly several extents, union them
-    ext <- ext[!is.na(ext)]
-    ext <- Reduce(raster::merge, ext)
-    # final bounding box in GRASS notation
-    params$GRASS_REGION_PARAMETER <- 
-      paste(c(ext@xmin, ext@xmax, ext@ymin, ext@ymax), collapse = ",")
-  }
-  
-  # run QGIS
-  
-  # shellquote algorithm name
-  start <- shQuote(alg)
-  # retrieve specified function arguments, i.e. the values
-  # Sometimes function arguments are already shellquoted. Shellquoting them 
-  # again will result in an error, e.g., grass7:r.viewshed
-  # Hence, get rid off shellQuotes (if there are any) before you shellQuote
-  # again... and ShellQuotes (or at least quotes) are needed when using the
-  # command line 
-  val <- vapply(params, function(x) {
-    # get rid off shellQuotes 
+  vals <- vapply(params, function(x) {
+    # get rid off 'strange' or incomplete shellQuotes
     tmp <- unlist(strsplit(as.character(x), ""))
     tmp <- tmp[tmp != "\""]
     # paste the argument together again
     tmp <- paste(tmp, collapse = "")
-    # shellQuote argument if they are not True, False or None
+    # shellQuote argument if is not True, False or None
     ifelse(grepl("True|False|None", tmp), tmp, shQuote(tmp))
   }, character(1))
+  # paste the function arguments together
+  args <- paste(vals, collapse = ", ")
+
+  # convert R parameter-argument list into a Python dictionary
+  py_run_string(paste("args = ", r_to_py(args)))
+  py_run_string(paste0("params = ", py_unicode(r_to_py(names(params)))))
+  py_run_string("params = dict((x, y) for x, y in zip(params, args))")
   
-  # build the Python command
-  args <- paste(val, collapse = ", ")
-  args <- paste0(paste(start, args, sep = ", "))
-  # run QGIS command (while catching possible error messages)
-  msg <- execute_cmds(processing_name = "processing.runalg",
-                      params = args,
-                      qgis_env = qgis_env,
-                      intern = ifelse(Sys.info()["sysname"] == "Darwin",
-                                      FALSE, TRUE))
-  if (any(grepl("Error", msg))) {
+  cmd <- paste(sprintf("res = processing.runalg('%s', params)", alg))
+  
+  # run QGIS
+  msg <- py_capture_output(py_run_string(cmd))
+  # If QGIS produces an error message, stop and report it
+  if (grepl("Unable to execute algorithm|Error", msg)) {
     stop(msg)
   }
-  # if a message was produced, show it in the console
-  if (show_msg && length(msg) > 0 && !identical(msg, tempdir())) {
-    message(msg)
-  }
-  
-  
+  # res contains all the output paths of the files created by QGIS
+  res <- py_run_string("res")$res
+  # show the output files to the user
+  print(res)
+  # if there is a message, show it (if msg = "", nothing will be shown)
+  message(msg)
+  # clean up after yourself!!
+  py_run_string(
+    "try:\n  del(res, args, params)\nexcept:\  pass")
+
   # load output
-  if (!is.null(load_output)) {
-    ls_1 <- lapply(load_output, function(x) {
-      
-      fname <- ifelse(dirname(x) == ".", 
-                      file.path(tmp_dir, x),
-                      x)
-       if (!file.exists(fname)) {
+  if (load_output) {
+    # just keep the output files
+    # Find out what the output names are
+    out_names <- 
+      py_run_string(
+        sprintf("out_names = RQGIS.get_args_man('%s')", alg))$out_names
+    out_names <- out_names$params[out_names$output]
+    # clean up after yourself!!
+    py_run_string(
+      "try:\n  del(out_names)\nexcept:\  pass")  
+    params_out <- params[out_names]
+    # just keep the files which were actually specified by the user
+    out_files <- params_out[params_out != "None"]
+    ls_1 <- lapply(out_files, function(x) {
+      # even if the user only specified an output name without an output
+      # directory, we have made sure above that the output is written to the
+      # temporary folder
+      if (!file.exists(x)) {
         stop("Unfortunately, QGIS did not produce: ", x)
       }
-     
-      test <- try(expr = 
-                    rgdal::readOGR(dsn = dirname(fname),
-                                   layer = gsub("\\..*", "", 
-                                                basename(fname)),
-                                   verbose = FALSE),
-                  silent = TRUE
-      )
       
-      # stop the function if the output exists but is empty
-      if (inherits(test, "try-error") && 
-          grepl("no features found", attr(test, "condition"))) {
-        stop("The output-file ", fname, " is empty, i.e. it has no features.")
-      }
+      # capture.output is necessary, since sf always reports (supposedly via
+      # C++) if the data source cannot be opened
+      capture.output({
+        test <- try(expr = st_read(dsn = dirname(x),
+                                 gsub("\\..*", "", basename(x)),
+                                 quiet = TRUE),
+                  silent = TRUE)
+      })
       # if the output exists and is not a vector try to load it as a raster
       if (inherits(test, "try-error")) {
-        raster::raster(fname)
+        raster(x)
         # well, well, if this doesn't work, you need to do something...
       } else {
         test
@@ -946,5 +1031,3 @@ run_qgis <- function(alg = NULL, params = NULL, check_params = TRUE,
     }
   }
 }
-
-
