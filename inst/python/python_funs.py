@@ -1,3 +1,48 @@
+"""
+***************************************************************************
+    python_funs.py
+    ---------------------
+    Date                 : May 2017
+    Copyright            : (C) 2017 by Jannes Muenchow, Victor Olaya
+    Email                : jannes dot muenchow at uni minus jena dot de
+***************************************************************************
+*                                                                         *
+*   This program is free software; you can redistribute it and/or modify  *
+*   it under the terms of the GNU General Public License as published by  *
+*   the Free Software Foundation; either version 2 of the License, or     *
+*   (at your option) any later version.                                   *
+*                                                                         *
+***************************************************************************
+"""
+
+__author__ = 'Jannes Muenchow, Victor Olaya'
+__date__ = 'May 2017'
+__copyright__ = '(C) 2017, Jannes Muenchow, Victor Olaya'
+
+from processing.core.Processing import Processing
+Processing.initialize()
+import processing
+# ParameterSelection required by get_args_man.py, algoptions, alghelp
+from processing.core.parameters import (
+  ParameterSelection,
+  ParameterRaster,
+  ParameterVector,
+  ParameterMultipleInput
+)
+from processing.gui.Postprocessing import handleAlgorithmResults
+# needed for open_help
+from processing.tools.help import createAlgorithmHelp
+# needed for qgis_session_info
+from processing.algs.saga.SagaAlgorithmProvider import SagaAlgorithmProvider
+from processing.algs.saga import SagaUtils
+from processing.algs.grass.GrassUtils import GrassUtils
+from processing.algs.grass7.Grass7Utils import Grass7Utils
+from processing.algs.otb.OTBAlgorithmProvider import OTBAlgorithmProvider
+from processing.algs.otb.OTBUtils import getInstalledVersion
+from processing.algs.taudem.TauDEMUtils import TauDEMUtils
+from osgeo import gdal
+from processing.tools.system import isWindows, isMac
+
 # RQGIS class should make it unlikely that somebody accidentally overwrites our
 # methods defined within this class.
 # A basic class consists only of the class keyword, the name of the class, and
@@ -118,50 +163,61 @@ class RQGIS:
     g6 = GrassUtils.isGrassInstalled
     if g6 is True and isWindows():
       g6 = GrassUtils.grassPath()
-      g6 = re.findall('grass-.*', g6)
+      # extract everything followed by grass-, i.e. extract the version number
+      g6 = re.findall("grass-(.*)", g6)
     if g6 is True and isMac():
-      g6 = GrassUtils.grassPath()
+      g6 = GrassUtils.grassPath()[0:21]
       g6 = os.listdir(g6)
       delim = ';'
       g6 = delim.join(g6)
-      g6 = re.findall(';(grass[0-9].);', g6)
+      g6 = re.findall('[0-9].[0-9].[0-9]', g6)
     Grass7Utils.checkGrass7IsInstalled()
     g7 = Grass7Utils.isGrass7Installed
     if g7 is True and isWindows():
       g7 = Grass7Utils.grassPath()
-      g7 = re.findall('grass-.*', g7)
+      g7 = re.findall('grass-(.*)',  g7)
     if g7 is True and isMac():
-      g7 = Grass7Utils.grassPath()
+      g7 = Grass7Utils.grassPath()[0:21]
       g7 = os.listdir(g7)
       delim = ';'
       g7 = delim.join(g7)
-      g7 = re.findall(';(grass[0-9].);', g7)
+      #g7 = re.findall(';(grass[0-9].);', g7)
+      g7 = re.findall('[0-9].[0-9].[0-9]', g7)
     # installed SAGA version usable with QGIS
     saga = SagaUtils.getSagaInstalledVersion()
     # supported SAGA versions
-    my_dict = SagaAlgorithmProvider.supportedVersions
-    saga_versions = my_dict.keys()
-    saga_versions.sort()
-     
-    # this is good to have for the future, but so far, I would not report 
-    # these software versions since we don't know if they actually work
-    # with QGIS (without additional functions such as run_taudem...)
-    # OTB versions
-    # "otb = getInstalledVersion()",
-    # "otb = OTBUtils.getInstalledVersion()",
+    try:
+      # supportedVersions were deleted from SagaAlgorithmProvider since 
+      # QGIS 2.18.10. At least this is the case with custom applications...
+      my_dict = SagaAlgorithmProvider.supportedVersions
+      saga_versions = my_dict.keys()
+      saga_versions.sort()
+    except:
+      # with QGIS 2.18.10 only SAGA 2.3.0 and 2.3.1 is suppported 
+      # well, observe next QGIS releases and try to avoid the hard-coding!
+      saga_versions = ["2.3.0", "2.3.1"]
     
     # GDAL
-    # "gdal = gdal.VersionInfo('VERSION_NUM')",
-    # "gdal = '.'.join([gdal[0], gdal[2], gdal[4]])",
+    gdal_v = gdal.VersionInfo('VERSION_NUM')
+    gdal_v = '.'.join([gdal_v[0], gdal_v[2], gdal_v[4]])
     
-    # write list for 'out.csv'
-    return [qgis, g6, g7, saga, saga_versions]
+    ## this is good to have for the future, but so far, I would not report 
+    ## these software versions since we don't know if they actually work
+    ## with QGIS (without additional functions such as run_taudem...)
+    ## OTB versions
+    # otb = getInstalledVersion()
+    # otb = OTBUtils.getInstalledVersion()
+    ## TauDEM versions (currently not in use because no function to extract
+    ## Taudem version in 'TauDEMUtils')
+    # TauDEMUtils.taudemMultifilePath()
     
-    # ls = [qgis, g6, g7, saga, saga_versions, otb, gdal]
-    ### TauDEM versions (currently not in use because no function to extract
-    ### Taudem version in 'TauDEMUtils')
-    # "TauDEMUtils.taudemMultifilePath()",
-
+    # finally, put it all into a named dictionary
+    keys = ["qgis_version", "gdal", "grass6", "grass7", "saga",\
+            "supported_saga_versions"]
+    values = [qgis, gdal_v, g6, g7, saga, saga_versions]
+    info = dict(zip(keys, values))
+    return info
+      
   # function inspired by processing.algoptions  
   def get_options(self, alg):
     alg = Processing.getAlgorithm(alg)

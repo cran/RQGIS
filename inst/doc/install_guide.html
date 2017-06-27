@@ -12,7 +12,7 @@
 
 <meta name="author" content="Jannes Muenchow, Patrick Schratz" />
 
-<meta name="date" content="2017-05-24" />
+<meta name="date" content="2017-06-27" />
 
 <title>(R)QGIS installation guide for Windows, Mac &amp; Linux</title>
 
@@ -70,7 +70,7 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 
 <h1 class="title toc-ignore">(R)QGIS installation guide for Windows, Mac &amp; Linux</h1>
 <h4 class="author"><em>Jannes Muenchow, Patrick Schratz</em></h4>
-<h4 class="date"><em>2017-05-24</em></h4>
+<h4 class="date"><em>2017-06-27</em></h4>
 
 
 <div id="TOC">
@@ -267,13 +267,13 @@ info<span class="op">$</span>supported_saga_versions</code></pre></div>
 <pre><code>saga_cmd
 saga_gui</code></pre>
 <p>Sometimes <code>saga_gui</code> produces following error message:</p>
-<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="ex">saga_gui</span>: error while loading shared libraries: libsaga_gdi-2.2.0.so: cannot open shared object file: No such file or directory</code></pre></div>
-<p>In this case, you have to enable the SAGA GUI by specifying the path where <code>libsaga_gdi-2.2.0.so</code> is located:</p>
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="ex">saga_gui</span>: error while loading shared libraries: libsaga_gdi-2.3.1.so: cannot open shared object file: No such file or directory</code></pre></div>
+<p>In this case, you have to enable the SAGA GUI by specifying the path where <code>libsaga_gdi-2.3.1.so</code> is located:</p>
 <div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="bu">export</span> <span class="va">LD_LIBRARY_PATH=</span>/usr/local/lib:<span class="va">$LD_LIBRARY_PATH</span>
 <span class="ex">saga_gui</span></code></pre></div>
 <p>Using SAGA &gt;= 2.2.1 you might encounter following message in the Processing log when opening QGIS: <code>Problem with SAGA installation: installed SAGA version (2.3.1) is not supported</code>. Though in this case SAGA is not available in the processing toolbox, you might still able to use it via the QGIS Python API and therefore also with RQGIS. Please note that SAGA 2.3.1 is the latest SAGA version supported by QGIS (2.14 and 2.18).</p>
 <p>In case you would like to uninstall SAGA, type:</p>
-<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="bu">cd</span> /home/jannes/saga 2.2.0
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="bu">cd</span> /home/jannes/saga-2.3.1
 <span class="fu">sudo</span> make uninstall</code></pre></div>
 </div>
 <div id="orfeo-toolbox-otb" class="section level2">

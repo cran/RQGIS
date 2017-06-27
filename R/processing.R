@@ -32,14 +32,6 @@
 set_env <- function(root = NULL, new = FALSE, dev = FALSE, ...) {
   # ok, let's try to find QGIS first in the most likely place!
   dots <- list(...)
-  if (length(dots) > 0 && any(grepl("ltr", names(dots)))) {
-    warning("Function argument 'ltr' is deprecated. Please use 'dev' instead.", 
-            call. = FALSE)
-    # we have to reverse the specified input, e.g., if ltr = TRUE, then dev 
-    # has to be FALSE
-    dev <- !isTRUE(dots$ltr)
-  }
-  
   # load cached qgis_env if possible
   if ("qgis_env" %in% ls(.RQGIS_cache) && new == FALSE) {
     return(get("qgis_env", envir = .RQGIS_cache))
@@ -278,10 +270,8 @@ open_app <- function(qgis_env = set_env()) {
   code <- paste0("sys.path.append(r'", qgis_env$python_plugins, "')")
   py_run_string(code)
   
-  # attach further modules 
-  py_file <- system.file("python", "import_setup.py", package = "RQGIS")
-  py_run_file(py_file)
-  # attach our RQGIS class (needed for alglist, algoptions, alghelp)
+  # attach further modules, our RQGIS class (needed for alglist, algoptions,
+  # alghelp)
   py_file <- system.file("python", "python_funs.py", package = "RQGIS")
   py_run_file(py_file)
   # initialize our RQGIS class
@@ -298,12 +288,8 @@ open_app <- function(qgis_env = set_env()) {
 #' @return The function returns a list with following elements:
 #' \enumerate{
 #'  \item{qgis_version: Name and version of QGIS used by RQGIS.}
-#'  \item{grass6: GRASS 6 version number. Under Linux, the function only checks if
-#'  GRASS 6 modules can be executed, therefore it simply returns TRUE instead of
-#'  a version number.}
-#'  \item{grass7: GRASS 7 version number. Under Linux, the function only checks if
-#'  GRASS 6 modules can be executed, therefore it simply returns TRUE instead of
-#'  a version number}
+#'  \item{grass6: GRASS 6 version number, if installed to use with QGIS.}
+#'  \item{grass7: GRASS 7 version number, if installed to use with QGIS.}
 #'  \item{saga: The installed SAGA version used by QGIS.}
 #'  \item{supported_saga_versions: character vector representing the SAGA
 #'  versions supported by the QGIS installation.}
@@ -318,22 +304,24 @@ qgis_session_info <- function(qgis_env = set_env()) {
   tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
   
   # retrieve the output
-  out <- 
+  out <-
     py_run_string("my_session_info = RQGIS.qgis_session_info()")$my_session_info
-  names(out) <- c("qgis_version", "grass6", "grass7", "saga",
-                  "supported_saga_versions")
+  # clean up after yourself!!
+  py_run_string(
+    "try:\n  del(my_session_info)\nexcept:\  pass")
   
-  
-  if (Sys.info()["sysname"] == "Linux" && out$grass7) {
+  if (Sys.info()["sysname"] == "Linux" && (out$grass6 | out$grass7)) {
     # find out which GRASS version is available
+    # inspired by link2GI::searchGRASSX
+    # Problem: sometimes the batch command is interrupted or does not finish...
     # my_grass <- searchGRASSX()
     suppressWarnings(
       my_grass <- system(paste0("find /usr ! -readable -prune -o -type f ",
-                              "-executable -iname 'grass??' -print"),
-                       intern = TRUE)
+                                "-executable -iname 'grass??' -print"),
+                         intern = TRUE)
     )
     
-    # QGIS developer team took care of this issue, so we can eventually delete 
+    # QGIS developer team took care of this issue, so we can eventually delete
     # it
     # if (grepl("72", my_grass)) {
     #   warning(paste0("QGIS might be still pointing to grass70. In this case ",
@@ -344,23 +332,22 @@ qgis_session_info <- function(qgis_env = set_env()) {
     #                  "January/038907.html'. Then restart R again."))
     # }
     
-    # more or less copied from link2GI::searchGRASSX
-    # Problem: sometimes the batch command is interrupted or does not finish...
     if (length(my_grass) > 0) {
-      install <- lapply(seq(length(my_grass)), function(i) {
-        cmd <- grep(readLines(my_grass), pattern = "cmd_name = \"", 
-                    value = TRUE)
-        cmd <- substr(cmd, gregexpr(pattern = "\"", cmd)[[1]][1] + 
-                        1, nchar(cmd) - 1)
-      })
+      my_grass <- lapply(seq(length(my_grass)), function(i) {
+        version <- grep(readLines(my_grass), pattern = "grass_version = \"",
+                        value = TRUE)
+        version <- paste(unlist(stringr::str_extract_all(version, "\\d(\\.)?")), 
+                         collapse = "")
+        })
+      my_grass <- unlist(my_grass)
+      out$grass6 <- grep("6", my_grass, value = TRUE) 
+      out$grass7 <- grep("7", my_grass, value = TRUE)
     }
-    out$grass7 <- grep("7", unlist(install), value = TRUE)
   }
   
-  # clean up after yourself!!
-  py_run_string(
-    "try:\n  del(my_session_info)\nexcept:\  pass")
-  out
+  # sort it again since Python dictionary sorting is random
+  out[c("qgis_version", "gdal", "grass6", "grass7", "saga",
+        "supported_saga_versions")]
 }
 
 #' @title Find and list available QGIS algorithms
@@ -838,20 +825,20 @@ pass_args <- function(alg, ..., params = NULL, qgis_env = set_env()) {
 #'  specified by the user (i.e. the user has to indicate output files) will be 
 #'  loaded into R. A list will be returned if there is more than one output file
 #'  (e.g., `grass7:r.slope.aspect`). See the example section for more details.
-#'@param check_params If `TRUE` (default), it will be checked if all 
-#'  geoalgorithm function arguments were provided in the correct order 
-#'  (deprecated).
-#'@param show_msg Logical, if `TRUE`, Python messages that occurred during the 
-#'  algorithm execution will be shown (deprecated).
+#'@param show_output_paths Logical. QGIS computes all possible output files for
+#'  a given geoalgorithm, and saves them to a temporary location in case the
+#'  user has not specified explicitly another output location. Setting
+#'  `show_output` to `TRUE` (the default) will print all output paths to the
+#'  console after the successful geoprocessing.
 #'@param qgis_env Environment containing all the paths to run the QGIS API. For 
 #'  more information, refer to [set_env()].
 #'@details This workhorse function calls the QGIS Python API, and specifically 
 #'  `processing.runalg`.
 #'@return The function prints a list (named according to the output parameters) 
 #'  containing the paths to the files created by QGIS. If not otherwise 
-#'  specified, the function saves the QGIS generated output files to a 
-#'  temporary folder (created by QGIS). Optionally, function parameter 
-#'  `load_output` loads spatial QGIS output (vector and raster data) into R.
+#'  specified, the function saves the QGIS generated output files to a temporary
+#'  folder (created by QGIS). Optionally, function parameter `load_output` loads
+#'  spatial QGIS output (vector and raster data) into R.
 #'@note Please note that one can also pass spatial R objects as input parameters
 #'  where suitable (e.g., input layer, input raster). Supported formats are 
 #'  [sp::SpatialPointsDataFrame()]-, [sp::SpatialLinesDataFrame()]-, 
@@ -865,12 +852,12 @@ pass_args <- function(alg, ..., params = NULL, qgis_env = set_env()) {
 #'  the region extent based on the user-specified input layers. If you do want 
 #'  to specify it yourself, please do it in accordance with the [QGIS 
 #'  documentation](https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html),
-#'  i.e. use a character string and separate the coordinates with a comma: 
+#'   i.e. use a character string and separate the coordinates with a comma: 
 #'  "xmin, xmax, ymin, ymax".
 #'  
 #'@author Jannes Muenchow, Victor Olaya, QGIS core team
 #'@export
-#'@importFrom sf st_read
+#'@importFrom sf read_sf
 #'@importFrom raster raster
 #' @examples
 #' \dontrun{
@@ -897,15 +884,8 @@ pass_args <- function(alg, ..., params = NULL, qgis_env = set_env()) {
 #'}
 
 run_qgis <- function(alg = NULL, ..., params = NULL, load_output = FALSE,
-                     check_params = TRUE, show_msg = TRUE,
-                     qgis_env = set_env()) {
+                     show_output_paths = TRUE, qgis_env = set_env()) {
 
-  if (!missing(check_params)) {
-    warning(paste("Argument check_params is deprecated; please do not use it", 
-                  "any longer. run_qgis now automatically checks all given", 
-                  "QGIS parameters."), 
-            call. = FALSE)
-  }
   # check if the QGIS application has already been started
   tmp <- try(expr =  open_app(qgis_env = qgis_env), silent = TRUE)
   
@@ -917,13 +897,6 @@ run_qgis <- function(alg = NULL, ..., params = NULL, load_output = FALSE,
   # if (Sys.info()["sysname"] == "Linux" & grepl("grass7", alg)) {
   #   qgis_session_info(qgis_env)
   # }
-
-  if (!missing(show_msg)) {
-    warning(paste("Argument show_msg is deprecated; please do not use it", 
-                  "any longer. run_qgis now always return any Python (error)", 
-                  "output"), 
-            call. = FALSE)
-  }
   
   # check if alg is qgis:vectorgrid
   if (alg == "qgis:vectorgrid") {
@@ -974,13 +947,17 @@ run_qgis <- function(alg = NULL, ..., params = NULL, load_output = FALSE,
   # If QGIS produces an error message, stop and report it
   if (grepl("Unable to execute algorithm|Error", msg)) {
     stop(msg)
-  }
+  } 
   # res contains all the output paths of the files created by QGIS
   res <- py_run_string("res")$res
   # show the output files to the user
-  print(res)
-  # if there is a message, show it (if msg = "", nothing will be shown)
-  message(msg)
+  if (show_output_paths) {
+    print(res)  
+  }
+  # if there is a message, show it
+  if (msg != "") {
+    message(msg)  
+  }
   # clean up after yourself!!
   py_run_string(
     "try:\n  del(res, args, params)\nexcept:\  pass")
@@ -1010,10 +987,7 @@ run_qgis <- function(alg = NULL, ..., params = NULL, load_output = FALSE,
       # capture.output is necessary, since sf always reports (supposedly via
       # C++) if the data source cannot be opened
       capture.output({
-        test <- try(expr = st_read(dsn = dirname(x),
-                                 gsub("\\..*", "", basename(x)),
-                                 quiet = TRUE),
-                  silent = TRUE)
+        test <- try(expr = read_sf(x), silent = TRUE)
       })
       # if the output exists and is not a vector try to load it as a raster
       if (inherits(test, "try-error")) {
