@@ -12,7 +12,7 @@
 
 <meta name="author" content="Jannes Muenchow, Patrick Schratz" />
 
-<meta name="date" content="2017-06-27" />
+<meta name="date" content="2017-11-04" />
 
 <title>(R)QGIS installation guide for Windows, Mac &amp; Linux</title>
 
@@ -70,7 +70,7 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 
 <h1 class="title toc-ignore">(R)QGIS installation guide for Windows, Mac &amp; Linux</h1>
 <h4 class="author"><em>Jannes Muenchow, Patrick Schratz</em></h4>
-<h4 class="date"><em>2017-06-27</em></h4>
+<h4 class="date"><em>2017-11-04</em></h4>
 
 
 <div id="TOC">
@@ -179,7 +179,7 @@ QSqlQuery::prepare: database not open
 <p>If you install QGIS &gt; 2.16 on your system using <code>brew cask install qgis</code>, GRASS7 will work out-of-the-box within QGIS. GRASS6 is deprecated and does not work anymore in QGIS &gt; 2.16 (see this <a href="http://gis.stackexchange.com/a/205964/43409">link</a>). If you installed QGIS using option 1 (osgeo4mac), GRASS 7 will also work with QGIS &lt; 2.16.</p>
 <p>You can still use GRASS6 if you</p>
 <ol style="list-style-type: decimal">
-<li>Install it via <code>brew install grass6</code> from the ‘osgeo4mac’ tap</li>
+<li>Install QGIS and GRASS via <code>brew install grass6</code> from the ‘osgeo4mac’ tap</li>
 <li>Link it in QGIS via “Processing - Options - Providers”</li>
 </ol>
 <p>The binary GRASS installation can be found <a href="https://grass.osgeo.org/download/software/mac-osx/">here</a>.</p>
@@ -210,10 +210,10 @@ testfolder <span class="op">=</span> <span class="st">'/usr/local/Cellar/saga-gi
 <p>Open a terminal window. First of all, make sure to remove QGIS and GRASS packages you may have installed before from other repositories:</p>
 <!--http://gis.stackexchange.com/questions/167472/qgis-2-8-ubuntu-14-04-installation-issues-terminal-command-attempts-to-install-->
 <div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">sudo</span> apt-get --purge remove qgis
-<span class="fu">sudo</span> apt autoremove --purge remove 
+<span class="fu">sudo</span> apt autoremove --purge-remove 
 <span class="fu">sudo</span> apt autoremove
 <span class="fu">sudo</span> apt-get update</code></pre></div>
-<p>Next add the correct repository to sources.list. Here, we use the QGIS long-term release (2.14) (for QGIS 2.18, we would have to use <a href="http://qgis.org/ubuntugis" class="uri">http://qgis.org/ubuntugis</a> instead of <a href="http://qgis.org/ubuntugis-ltr" class="uri">http://qgis.org/ubuntugis-ltr</a>):</p>
+<p>Next add the correct repository to <code>/etc/apt/sources.list</code>. Here, we use the QGIS long-term release (2.14) (for QGIS 2.18, we would have to use <a href="http://qgis.org/ubuntugis" class="uri">http://qgis.org/ubuntugis</a> instead of <a href="http://qgis.org/ubuntugis-ltr" class="uri">http://qgis.org/ubuntugis-ltr</a>):</p>
 <div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="co"># add QGIS repository for Ubuntu 16.04 to sources.list</span>
 <span class="fu">sudo</span> sh -c <span class="st">'echo &quot;deb http://qgis.org/ubuntugis-ltr xenial main&quot; &gt;&gt; /etc/apt/sources.list'</span>
 <span class="fu">sudo</span> sh -c <span class="st">'echo &quot;deb-src http://qgis.org/ubuntugis-ltr xenial main&quot; &gt;&gt; /etc/apt/sources.list'</span>
@@ -223,16 +223,23 @@ testfolder <span class="op">=</span> <span class="st">'/usr/local/Cellar/saga-gi
 <div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">sudo</span> apt-get update
 <span class="fu">sudo</span> apt-get install qgis python-qgis qgis-plugin-grass</code></pre></div>
 <p>If this results in keyserver errors, add the qgis.org repository public key to your apt keyring:</p>
-<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">wget</span> -O - http://qgis.org/downloads/qgis-2015.gpg.key <span class="kw">|</span> <span class="ex">gpg</span> --import
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">wget</span> -O - http://qgis.org/downloads/qgis-2017.gpg.key <span class="kw">|</span> <span class="ex">gpg</span> --import
 <span class="co"># to verify, run:</span>
-<span class="co"># gpg --fingerprint 3FF5FFCAD71472C4</span>
-<span class="ex">gpg</span> --export --armor 3FF5FFCAD71472C4 <span class="kw">|</span> <span class="fu">sudo</span> apt-key add -
+<span class="co"># gpg --fingerprint CAEB3DC3BDF7FB45</span>
+<span class="ex">gpg</span> --export --armor CAEB3DC3BDF7FB45 <span class="kw">|</span> <span class="fu">sudo</span> apt-key add -
 <span class="fu">sudo</span> apt-get update
 <span class="fu">sudo</span> apt-get install qgis python-qgis qgis-plugin-grass</code></pre></div>
-<p>This will install the QGIS 2.14 release (LTR) as well as GRASS-GIS as third-party provider.</p>
+<p>This will install the QGIS 2.14 release (LTR) as well as GRASS-GIS as third-party provider. To upgrade to QGIS 2.18 one simply has to change <code>/etc/apt/sources.list</code> (see above) and run:</p>
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">sudo</span> apt-get update
+<span class="fu">sudo</span> apt-get upgrade</code></pre></div>
+<p>Assuming we have installed QGIS 2.18 and wish to replace it by QGIS 2.14, one naturally has to change <code>etc/apt/sources.list</code> accordingly. Additionally, we probably need to downgrade some packages. For more information, please refer to this <a href="https://stackoverflow.com/questions/36879592/has-anyone-got-qgis-to-install-on-ubuntu-16-04-lts">post</a>.</p>
 </div>
 <div id="saga-1" class="section level2">
 <h2>SAGA</h2>
+<p>You can install the SAGA LTS 2.3.1 version from the <a href="https://launchpad.net/~ubuntugis/+archive/ubuntu/ubuntugis-unstable">ubuntugis/unstable</a> repository. If you haven’t done so yet, add the repository and then simply install SAGA via <code>apt-get</code>:</p>
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">sudo</span> add-apt-repository ppa:ubuntugis/ubuntugis-unstable
+<span class="fu">sudo</span> apt-get update
+<span class="fu">sudo</span> apt-get install saga</code></pre></div>
 <!---
 To use SAGA functions within (R)QGIS, you naturally need to install SAGA GIS. To install the most recent SAGA version, simply execute the following lines in a terminal window: 
 
@@ -243,19 +250,19 @@ sudo apt-get install saga
 ```
 sudo add-apt-repository --remove ppa:johanvdw/saga-gis
 --->
-<p>Unfortunately, QGIS does not support the latest SAGA versions. To find out which SAGA versions are supported by your QGIS installation, run:</p>
+<p>If you would like to use another SAGA version, you need to compile it yourself. To find out which SAGA versions are supported by your QGIS installation, run:</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(<span class="st">&quot;RQGIS&quot;</span>)
 info &lt;-<span class="st"> </span><span class="kw">qgis_session_info</span>()
 info<span class="op">$</span>supported_saga_versions</code></pre></div>
-<p>This also means we cannot simply use a package manager to install SAGA. Instead we need to compile one of the SAGA versions from source supported by QGIS. After the installation you will find the SAGA algorithms in the processing toolbox of the QGIS GUI (this might not be true for SAGA &gt;= 2.2.1 see further below). Prior to the SAGA installation, we need to install various dependencies required by SAGA. Here, we just quickly show how to install SAGA and its dependencies under Ubuntu. Please refer to this <a href="https://sourceforge.net/p/saga-gis/wiki/Compiling%20SAGA%20on%20Linux/">page</a> for a more comprehensive SAGA installation guide. Please note that we simply present in great parts a copy of this guide here.</p>
+<p>After the installation you will find the SAGA algorithms in the processing toolbox of the QGIS GUI (this might not be true for SAGA &gt;= 2.2.1 see further below). Prior to the SAGA installation, we need to install various dependencies required by SAGA. Here, we just quickly show how to install SAGA and its dependencies under Ubuntu. Please refer to this <a href="https://sourceforge.net/p/saga-gis/wiki/Compiling%20SAGA%20on%20Linux/">page</a> for a more comprehensive SAGA installation guide. Please note that we here simply reproduce in great parts a copy of this guide.</p>
 <p>First of all, install all necessary SAGA dependencies and a few compilation and configuration tools:</p>
 <div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">sudo</span> apt-get install libwxgtk3.0-dev libtiff4-dev libgdal-dev libproj-dev libjasper-dev libexpat1-dev wx-common libexpat1-dev libogdi3.2-dev unixodbc-dev
 
 <span class="co"># compilation and configuration tools</span>
 <span class="fu">sudo</span> apt-get install g++ make automake libtool git</code></pre></div>
 <p>Next, we would like to download a specific SAGA version. Check out the various available versions <a href="https://sourceforge.net/projects/saga-gis/files/">here</a>. Here, we will download SAGA 2.3.1 into our home directory, unpack it and change the working directory to the unpacked folder:</p>
-<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">wget</span> -O /home/jannes/saga-git <span class="st">&quot;https://sourceforge.net/projects/saga-gis/files/SAGA%20-%202.3/SAGA%202.3.1/saga_2.3.1.tar.gz&quot;</span>
-<span class="bu">cd</span> /home/jannes
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="fu">wget</span> -O /home/<span class="op">&lt;</span>YourUserName<span class="op">&gt;</span>/saga-git <span class="st">&quot;https://sourceforge.net/projects/saga-gis/files/SAGA%20-%202.3/SAGA%202.3.1/saga_2.3.1.tar.gz&quot;</span>
+<span class="bu">cd</span> /home/<span class="op">&lt;</span>YourUserName<span class="op">&gt;</span>
 <span class="fu">sudo</span> tar -xvzf saga-git
 <span class="bu">cd</span> saga-2.3.1</code></pre></div>
 <p>Having done so, we are ready to compile SAGA:</p>
@@ -273,7 +280,7 @@ saga_gui</code></pre>
 <span class="ex">saga_gui</span></code></pre></div>
 <p>Using SAGA &gt;= 2.2.1 you might encounter following message in the Processing log when opening QGIS: <code>Problem with SAGA installation: installed SAGA version (2.3.1) is not supported</code>. Though in this case SAGA is not available in the processing toolbox, you might still able to use it via the QGIS Python API and therefore also with RQGIS. Please note that SAGA 2.3.1 is the latest SAGA version supported by QGIS (2.14 and 2.18).</p>
 <p>In case you would like to uninstall SAGA, type:</p>
-<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="bu">cd</span> /home/jannes/saga-2.3.1
+<div class="sourceCode"><pre class="sourceCode sh"><code class="sourceCode bash"><span class="bu">cd</span> /home/<span class="op">&lt;</span>YourUserName<span class="op">&gt;</span>/saga-2.3.1
 <span class="fu">sudo</span> make uninstall</code></pre></div>
 </div>
 <div id="orfeo-toolbox-otb" class="section level2">
