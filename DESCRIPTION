@@ -1,12 +1,18 @@
 Package: RQGIS
-Date: 2017-11-03
+Date: 2018-01-22
 Type: Package
 Title: Integrating R with QGIS
-Version: 1.0.2
+Version: 1.0.3
 Authors@R: c(
-    person("Jannes", "Muenchow", , "jannes.muenchow@uni-jena.de", c("aut", "cre")),
-    person("Patrick", "Schratz", , "patrick.schratz@uni-jena.de", role = "aut")
-    )
+    person("Jannes", "Muenchow",
+    email = "jannes.muenchow@uni-jena.de", 
+    role = c("aut", "cre"),
+    comment = c(ORCID = '0000-0001-7834-4717')),
+    person("Patrick", "Schratz", ,
+    email = "patrick.schratz@uni-jena.de", 
+    role = c("aut"),
+    comment = c(ORCID = '0000-0003-0748-6624')
+    ))
 Description: Establishes an interface between R and 'QGIS', i.e. it allows
     the user to access 'QGIS' functionalities from the R console. It achieves this
     by using the 'QGIS' Python API via the command line. Hence, RQGIS extends R's
@@ -26,12 +32,12 @@ Depends: R (>= 3.2.0), reticulate (>= 1.2)
 Imports: raster, RCurl, readr, rgdal, sf (>= 0.4-2), sp, stringr,
         tools, XML
 SystemRequirements: Python (>= 2.7), QGIS (>= 2.14)
-Suggests: knitr, rgrass7, rmarkdown, testthat
+Suggests: knitr, rgrass7, rmarkdown, testthat, RSAGA
 VignetteBuilder: knitr
 NeedsCompilation: no
-Packaged: 2017-11-04 10:24:48 UTC; pi37pat
-Author: Jannes Muenchow [aut, cre],
-  Patrick Schratz [aut]
+Packaged: 2018-01-23 16:50:19 UTC; pi37pat
+Author: Jannes Muenchow <https://orcid.org/0000-0001-7834-4717> [aut, cre],
+  Patrick Schratz <https://orcid.org/0000-0003-0748-6624> [aut]
 Maintainer: Jannes Muenchow <jannes.muenchow@uni-jena.de>
 Repository: CRAN
-Date/Publication: 2017-11-04 23:30:30 UTC
+Date/Publication: 2018-01-23 17:00:56 UTC

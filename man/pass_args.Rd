@@ -4,7 +4,7 @@
 \alias{pass_args}
 \title{Specifying QGIS geoalgorithm parameters the R way}
 \usage{
-pass_args(alg, ..., params = NULL, qgis_env = set_env())
+pass_args(alg, ..., params = NULL, NA_flag = -99999, qgis_env = set_env())
 }
 \arguments{
 \item{alg}{The name of the geoalgorithm to use.}
@@ -16,6 +16,9 @@ R named arguments.}
 \code{\link[=get_args_man]{get_args_man()}} for more details. Please note that you can either specify
 R arguments directly via the triple dots (see above) or via the
 parameter-argument list. However, you may not mix the two methods.}
+
+\item{NA_flag}{Value used for NAs when exporting raster objects through
+\code{\link[=save_spatial_objects]{save_spatial_objects()}} (default: -99999).}
 
 \item{qgis_env}{Environment containing all the paths to run the QGIS API. For
 more information, refer to \code{\link[=set_env]{set_env()}}.}
@@ -46,17 +49,14 @@ respective default values which were not set by the user with the help of
 \code{\link[=get_args_man]{get_args_man()}}.
 \item If an argument value corresponds to a spatial object residing in R
 (\code{sp}-, \code{sf}- or \code{raster}-objects are supported), the function will save
-the spatial object to a temporary folder, and use the corresponding file
-path to replace the spatial object in the parameter-argument list. If the
-QGIS geoalgorithm parameter belongs to the
-\code{ParameterMultipleInput}-instance class (see for example
-\code{get_usage(grass7:v.patch)}) you may either use a character-string
-containing the paths to the spatial objects separated by a semi-colon
-(e.g., "shape1.shp;shape2.shp;shape3.shp" - see also \href{https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html}{QGISdocumentation})
-or provide a \code{\link[base:list]{base::list()}} containing the spatial objects.
-\item If the user only specified the name of an output file (e.g.
-"slope.asc") and not a complete path, the function will save the output in
-the temporary folder, i.e. to \code{file.path(tempdir(), "slope.asc")}.
+the spatial object to \code{tempdir()}, and use the corresponding file path to
+replace the spatial object in the parameter-argument list. If the QGIS
+geoalgorithm parameter belongs to the \code{ParameterMultipleInput}-instance
+class (see for example \code{get_usage(grass7:v.patch)}) you may either use a
+character-string containing the paths to the spatial objects separated by a
+semi-colon (e.g., "shape1.shp;shape2.shp;shape3.shp" - see also \href{https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html}{QGISdocumentation})
+or provide a \code{\link[base:list]{base::list()}} where each spatial object corresponds to one
+list element.
 \item If a parameter accepts as arguments values from a selection, the
 function replaces verbal input by the corresponding number (required by the
 QGIS Python API). Please refer to the example section for more details, and
@@ -70,7 +70,7 @@ i.e., use a character string and separate the coordinates with a comma:
 }
 }
 \note{
-The function was inspired by \code{\link[rgrass7:doGRASS]{rgrass7::doGRASS()}}.
+This function was inspired by \code{\link[rgrass7:doGRASS]{rgrass7::doGRASS()}}.
 }
 \examples{
 \dontrun{

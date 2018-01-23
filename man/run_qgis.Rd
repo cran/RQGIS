@@ -5,7 +5,7 @@
 \title{Interface to QGIS commands}
 \usage{
 run_qgis(alg = NULL, ..., params = NULL, load_output = FALSE,
-  show_output_paths = TRUE, qgis_env = set_env())
+  show_output_paths = TRUE, NA_flag = -99999, qgis_env = set_env())
 }
 \arguments{
 \item{alg}{Name of the GIS function to be used (see \code{\link[=find_algorithms]{find_algorithms()}}).}
@@ -30,6 +30,9 @@ a given geoalgorithm, and saves them to a temporary location in case the
 user has not specified explicitly another output location. Setting
 \code{show_output} to \code{TRUE} (the default) will print all output paths to the
 console after the successful geoprocessing.}
+
+\item{NA_flag}{Value used for NAs when exporting raster objects through
+\code{\link[=pass_args]{pass_args()}} and \code{\link[=save_spatial_objects]{save_spatial_objects()}} (default: -99999).}
 
 \item{qgis_env}{Environment containing all the paths to run the QGIS API. For
 more information, refer to \code{\link[=set_env]{set_env()}}.}
@@ -62,7 +65,7 @@ GRASS users do not have to specify manually the GRASS region extent
 \code{run_qgis} (see \code{\link[=pass_args]{pass_args()}} for more details) will automatically determine
 the region extent based on the user-specified input layers. If you do want
 to specify it yourself, please do it in accordance with the \href{https://docs.qgis.org/2.8/en/docs/user_manual/processing/console.html}{QGISdocumentation},
-i.e. use a character string and separate the coordinates with a comma:
+i.e., use a character string and separate the coordinates with a comma:
 "xmin, xmax, ymin, ymax".
 }
 \examples{
@@ -76,13 +79,13 @@ find_algorithms(search_term = "grass7.*slope")
 alg <- "grass7:r.slope.aspect"
 get_usage(alg)
 # 1. run QGIS using R named arguments, and load the QGIS output back into R
-slope <- run_qgis(alg, elevation = dem, slope = "slope.asc", 
+slope <- run_qgis(alg, elevation = dem, slope = "slope.asc",
                   load_output = TRUE)
 # 2. doing the same with a parameter-argument list
 params <- list(elevation = dem, slope = "slope.asc")
 slope <- run_qgis(alg, params = params, load_output = TRUE)
-# 3. calculate the slope, the aspect and the pcurvature. 
-terrain <- run_qgis(alg, elevation = dem, slope = "slope.asc", 
+# 3. calculate the slope, the aspect and the pcurvature.
+terrain <- run_qgis(alg, elevation = dem, slope = "slope.asc",
                     aspect = "aspect.asc", pcurvature = "pcurv.asc",
                     load_output = TRUE)
 # the three output rasters are returned in a list of length 3
